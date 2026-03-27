@@ -1,0 +1,182 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Thông tin người dùng hệ thống",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Thông tin khách hàng",
+      "type": "object",
+      "properties": {
+        "consultationDate": { "type": "number" },
+        "fbLink": { "type": "string" },
+        "fbAccount": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "subject": { "type": "string" },
+        "status": { "type": "string", "enum": ["Chưa phản hồi", "Phân vân", "Đã chốt", "Khác"] },
+        "notes": { "type": "string" },
+        "closedAmount": { "type": "string" },
+        "source": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "status", "ownerId", "ownerName", "createdAt", "updatedAt"]
+    },
+    "Interaction": {
+      "title": "Interaction",
+      "description": "Lịch sử trao đổi với khách hàng",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "content": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["đã liên hệ", "chưa phản hồi", "quan tâm", "từ chối"] },
+        "staffId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["customerId", "content", "staffId"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Lịch hẹn với khách hàng",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "time": { "type": "number" },
+        "content": { "type": "string" },
+        "staffId": { "type": "string" },
+        "status": { "type": "string", "enum": ["đã diễn ra", "hoãn", "hủy", "chưa diễn ra"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["customerId", "customerName", "customerPhone", "time", "staffId"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "Danh sách môn học",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "createdAt"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Thông tin giáo viên",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "subjects": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "phone", "createdAt"]
+    },
+    "TeachingAssistant": {
+      "title": "TeachingAssistant",
+      "description": "Thông tin trợ giảng",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "phone", "createdAt"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "Thông tin lớp học",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "studentIds": { "type": "array", "items": { "type": "string" } },
+        "studentNames": { "type": "array", "items": { "type": "string" } },
+        "subject": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "taId": { "type": "string" },
+        "taName": { "type": "string" },
+        "schedule": { "type": "string" },
+        "startDate": { "type": "number" },
+        "status": { "type": "string", "enum": ["đang học", "kết thúc", "tạm dừng"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "studentIds", "studentNames", "subject", "teacherId", "teacherName", "status", "createdAt", "updatedAt"]
+    },
+    "TeachingSession": {
+      "title": "TeachingSession",
+      "description": "Thông tin buổi học cụ thể",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "className": { "type": "string" },
+        "subject": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "taId": { "type": "string" },
+        "taName": { "type": "string" },
+        "date": { "type": "number" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["đang học", "kết thúc", "tạm dừng"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["classId", "className", "subject", "teacherId", "teacherName", "date", "startTime", "endTime", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "Profiles of system users"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer records"
+    },
+    "/interactions/{interactionId}": {
+      "schema": "Interaction",
+      "description": "Interaction history records"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Appointment records"
+    },
+    "/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Subject records"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Teacher records"
+    },
+    "/teaching_assistants/{taId}": {
+      "schema": "TeachingAssistant",
+      "description": "Teaching assistant records"
+    },
+    "/classes/{classId}": {
+      "schema": "Class",
+      "description": "Class records"
+    },
+    "/teaching_sessions/{sessionId}": {
+      "schema": "TeachingSession",
+      "description": "Specific teaching session records"
+    }
+  }
+}

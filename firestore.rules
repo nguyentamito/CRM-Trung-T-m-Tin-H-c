@@ -1,0 +1,284 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string (required)
+    //   - role: string (required, enum: ['admin', 'staff'])
+    //
+    // Collection: customers
+    // Document ID: auto-generated
+    // Fields:
+    //   - consultationDate: number
+    //   - fbLink: string
+    //   - fbAccount: string
+    //   - name: string (required)
+    //   - phone: string
+    //   - subject: string
+    //   - status: string (required, enum: ['Chưa phản hồi', 'Phân vân', 'Đã chốt', 'Khác'])
+    //   - notes: string
+    //   - closedAmount: string
+    //   - source: string
+    //   - ownerId: string (required)
+    //   - ownerName: string (required)
+    //   - createdAt: number (required)
+    //   - updatedAt: number (required)
+    //
+    // Collection: interactions
+    // Document ID: auto-generated
+    // Fields:
+    //   - customerId: string (required)
+    //   - content: string (required)
+    //   - notes: string
+    //   - status: string (required, enum: ['đã liên hệ', 'chưa phản hồi', 'quan tâm', 'từ chối'])
+    //   - staffId: string (required)
+    //   - createdAt: number (required)
+    //
+    // Collection: appointments
+    // Document ID: auto-generated
+    // Fields:
+    //   - customerId: string (required)
+    //   - customerName: string (required)
+    //   - customerPhone: string (required)
+    //   - time: number (required)
+    //   - content: string (required)
+    //   - staffId: string (required)
+    //   - status: string (required, enum: ['đã diễn ra', 'hoãn', 'hủy', 'chưa diễn ra'])
+    //   - createdAt: number (required)
+    //
+    // Collection: subjects
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - createdAt: number (required)
+    //
+    // Collection: teachers
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - email: string
+    //   - subjects: list (required)
+    //   - createdAt: number (required)
+    //
+    // Collection: teaching_assistants
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - email: string
+    //   - createdAt: number (required)
+    //
+    // Collection: classes
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - studentIds: list (required)
+    //   - studentNames: list (required)
+    //   - subject: string (required)
+    //   - teacherId: string (required)
+    //   - teacherName: string (required)
+    //   - taId: string
+    //   - taName: string
+    //   - schedule: string
+    //   - startDate: number
+    //   - status: string (required, enum: ['đang học', 'kết thúc', 'tạm dừng'])
+    //   - createdAt: number (required)
+    //   - updatedAt: number (required)
+    //
+    // Collection: teaching_sessions
+    // Document ID: auto-generated
+    // Fields:
+    //   - classId: string (required)
+    //   - className: string (required)
+    //   - subject: string (required)
+    //   - teacherId: string (required)
+    //   - teacherName: string (required)
+    //   - taId: string
+    //   - taName: string
+    //   - date: number (required)
+    //   - startTime: string (required)
+    //   - endTime: string (required)
+    //   - status: string (required, enum: ['đang học', 'kết thúc', 'tạm dừng'])
+    //   - createdAt: number (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "nguyentamito@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isStaff() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role']) &&
+             data.uid is string && data.email is string && data.displayName is string &&
+             data.role in ['admin', 'staff'];
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['name', 'status', 'ownerId', 'ownerName', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.status in ['Chưa phản hồi', 'Phân vân', 'Đã chốt', 'Khác'] &&
+             data.ownerId is string &&
+             data.ownerName is string && data.ownerName.size() > 0 && data.ownerName.size() < 100 &&
+             data.createdAt is number && data.updatedAt is number &&
+             (!('consultationDate' in data) || data.consultationDate is number) &&
+             (!('fbLink' in data) || data.fbLink is string) &&
+             (!('fbAccount' in data) || data.fbAccount is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('subject' in data) || data.subject is string) &&
+             (!('notes' in data) || data.notes is string) &&
+             (!('closedAmount' in data) || data.closedAmount is string) &&
+             (!('source' in data) || data.source is string);
+    }
+
+    function isValidInteraction(data) {
+      return data.keys().hasAll(['customerId', 'content', 'status', 'staffId', 'createdAt']) &&
+             data.customerId is string && data.content is string && data.content.size() < 5000 &&
+             data.status in ['đã liên hệ', 'chưa phản hồi', 'quan tâm', 'từ chối'] &&
+             data.staffId is string && data.createdAt is number;
+    }
+
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['customerId', 'customerName', 'customerPhone', 'time', 'content', 'staffId', 'status', 'createdAt']) &&
+             data.customerId is string && data.customerName is string && data.customerPhone is string &&
+             data.time is number && data.content is string && data.content.size() < 1000 &&
+             data.staffId is string && data.status in ['đã diễn ra', 'hoãn', 'hủy', 'chưa diễn ra'] &&
+             data.createdAt is number;
+    }
+
+    function isValidSubject(data) {
+      return data.keys().hasAll(['name', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.createdAt is number;
+    }
+
+    function isValidTeacher(data) {
+      return data.keys().hasAll(['name', 'phone', 'email', 'subjects', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.phone is string && data.email is string &&
+             data.subjects is list && data.createdAt is number;
+    }
+
+    function isValidTA(data) {
+      return data.keys().hasAll(['name', 'phone', 'email', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.phone is string && data.email is string &&
+             data.createdAt is number;
+    }
+
+    function isValidClass(data) {
+      return data.keys().hasAll(['name', 'studentIds', 'studentNames', 'subject', 'teacherId', 'teacherName', 'status', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.studentIds is list && data.studentNames is list &&
+             data.subject is string && data.teacherId is string && data.teacherName is string &&
+             data.status in ['đang học', 'kết thúc', 'tạm dừng'] &&
+             data.createdAt is number && data.updatedAt is number &&
+             (!('taId' in data) || data.taId is string) &&
+             (!('taName' in data) || data.taName is string) &&
+             (!('schedule' in data) || data.schedule is string) &&
+             (!('startDate' in data) || data.startDate is number);
+    }
+
+    function isValidTeachingSession(data) {
+      return data.keys().hasAll(['classId', 'className', 'subject', 'teacherId', 'teacherName', 'date', 'startTime', 'endTime', 'status', 'createdAt']) &&
+             data.classId is string && data.className is string && data.subject is string &&
+             data.teacherId is string && data.teacherName is string &&
+             data.date is number && data.startTime is string && data.endTime is string &&
+             data.status in ['đang học', 'kết thúc', 'tạm dừng'] &&
+             data.createdAt is number &&
+             (!('taId' in data) || data.taId is string) &&
+             (!('taName' in data) || data.taName is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(uid) && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == 'staff' || isAdmin());
+      allow update: if (isOwner(uid) && request.resource.data.role == resource.data.role && isValidUser(request.resource.data)) || isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.ownerId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidCustomer(request.resource.data) && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidCustomer(request.resource.data) && 
+                      (isAdmin() || (resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == resource.data.ownerId));
+      allow delete: if isAdmin();
+    }
+
+    match /interactions/{interactionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidInteraction(request.resource.data) && request.resource.data.staffId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidInteraction(request.resource.data) && 
+                      (isAdmin() || resource.data.staffId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAppointment(request.resource.data) && request.resource.data.staffId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidAppointment(request.resource.data) && 
+                      (isAdmin() || resource.data.staffId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidSubject(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /teachers/{teacherId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidTeacher(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /teaching_assistants/{taId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidTA(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidClass(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /teaching_sessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidTeachingSession(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

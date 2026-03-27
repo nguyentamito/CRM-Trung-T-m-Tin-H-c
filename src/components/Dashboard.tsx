@@ -1,0 +1,223 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Users, 
+  UserCheck, 
+  Clock, 
+  TrendingUp,
+  ArrowUpRight,
+  ArrowDownRight
+} from 'lucide-react';
+import { collection, query, onSnapshot, where } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { Customer, Appointment, UserProfile } from '../types';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
+
+interface DashboardProps {
+  profile: UserProfile | null;
+}
+
+export default function Dashboard({ profile }: DashboardProps) {
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile) return;
+
+    const customersQuery = profile.role === 'admin' 
+      ? query(collection(db, 'customers'))
+      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid));
+
+    const appointmentsQuery = profile.role === 'admin'
+      ? query(collection(db, 'appointments'))
+      : query(collection(db, 'appointments'), where('staffId', '==', profile.uid));
+
+    const unsubCustomers = onSnapshot(customersQuery, (snapshot) => {
+      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'customers');
+    });
+
+    const unsubAppointments = onSnapshot(appointmentsQuery, (snapshot) => {
+      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'appointments');
+    });
+
+    return () => {
+      unsubCustomers();
+      unsubAppointments();
+    };
+  }, [profile]);
+
+  const stats = [
+    { label: 'Tổng khách hàng', value: customers.length, icon: Users, color: 'blue' },
+    { label: 'Khách hàng mới', value: customers.filter(c => c.createdAt > Date.now() - 30 * 24 * 60 * 60 * 1000).length, icon: TrendingUp, color: 'green' },
+    { label: 'Lịch hẹn hôm nay', value: appointments.filter(a => {
+      const today = new Date();
+      const appDate = new Date(a.time);
+      return today.toDateString() === appDate.toDateString();
+    }).length, icon: Clock, color: 'orange' },
+    { label: 'Đã chốt', value: customers.filter(c => c.status === 'Đã chốt').length, icon: UserCheck, color: 'purple' },
+  ];
+
+  const statusData = [
+    { name: 'Chưa phản hồi', value: customers.filter(c => c.status === 'Chưa phản hồi').length },
+    { name: 'Phân vân', value: customers.filter(c => c.status === 'Phân vân').length },
+    { name: 'Đã chốt', value: customers.filter(c => c.status === 'Đã chốt').length },
+    { name: 'Khác', value: customers.filter(c => c.status === 'Khác').length },
+  ];
+
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
+
+  const monthlyData = [
+    { name: 'T1', value: 40 },
+    { name: 'T2', value: 30 },
+    { name: 'T3', value: 60 },
+    { name: 'T4', value: 45 },
+    { name: 'T5', value: 75 },
+    { name: 'T6', value: 55 },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Tổng quan hệ thống</h1>
+        <p className="text-gray-500">Chào mừng trở lại, {profile?.displayName}!</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {stats.map((stat, idx) => {
+          const Icon = stat.icon;
+          return (
+            <div key={idx} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-xl bg-${stat.color}-50 flex items-center justify-center`}>
+                <Icon className={`w-6 h-6 text-${stat.color}-600`} />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 font-medium">{stat.label}</p>
+                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900 mb-6">Tỷ lệ trạng thái khách hàng</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={statusData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {statusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mt-4">
+            {statusData.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx] }} />
+                <span className="text-sm text-gray-600">{item.name}: {item.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900 mb-6">Khách hàng mới theo tháng</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 12 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 12 }} />
+                <Tooltip 
+                  cursor={{ fill: '#f9fafb' }}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                />
+                <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={32} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
