@@ -7,10 +7,11 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  orderBy 
+  orderBy,
+  where
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Class, Teacher, TeachingAssistant, Customer, Subject, UserProfile, TeachingSession } from '../types';
+import { Class, Teacher, TeachingAssistant, Customer, Subject, UserProfile, TeachingSession, Attendance, SessionStatus } from '../types';
 import { 
   ChevronLeft,
   ChevronRight,
@@ -47,12 +48,18 @@ export default function ClassList({ profile }: ClassListProps) {
   const [currentWeekStart, setCurrentWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
+  const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'students'>('list');
   const [studentModalTab, setStudentModalTab] = useState<'list' | 'add'>('list');
   const [editingClass, setEditingClass] = useState<Class | null>(null);
   const [editingSession, setEditingSession] = useState<TeachingSession | null>(null);
+  const [selectedSessionForAttendance, setSelectedSessionForAttendance] = useState<TeachingSession | null>(null);
+  const [attendanceRecords, setAttendanceRecords] = useState<Attendance[]>([]);
   const [selectedClassForStudents, setSelectedClassForStudents] = useState<Class | null>(null);
   const isAdmin = profile?.role === 'admin';
+  const isStaff = profile?.role === 'staff';
+  const isTeacher = profile?.role === 'teacher';
+  const canMarkAttendance = isAdmin || isStaff || isTeacher;
 
   const [formData, setFormData] = useState({
     name: '',
@@ -74,7 +81,7 @@ export default function ClassList({ profile }: ClassListProps) {
     date: format(new Date(), 'yyyy-MM-dd'),
     startTime: '08:00',
     endTime: '09:30',
-    status: 'đang học' as Class['status'],
+    status: 'chưa diễn ra' as SessionStatus,
   });
 
   useEffect(() => {
@@ -93,7 +100,10 @@ export default function ClassList({ profile }: ClassListProps) {
       setTAs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingAssistant)));
     });
 
-    const qCustomers = query(collection(db, 'customers'), orderBy('name', 'asc'));
+    const qCustomers = profile?.role === 'admin'
+      ? query(collection(db, 'customers'), orderBy('name', 'asc'))
+      : query(collection(db, 'customers'), where('ownerId', '==', profile?.uid), orderBy('name', 'asc'));
+
     const unsubscribeCustomers = onSnapshot(qCustomers, (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
     });
@@ -108,6 +118,11 @@ export default function ClassList({ profile }: ClassListProps) {
       setTeachingSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingSession)));
     });
 
+    const qAttendance = query(collection(db, 'attendance'));
+    const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
+      setAttendanceRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
+    });
+
     return () => {
       unsubscribe();
       unsubscribeTeachers();
@@ -115,6 +130,7 @@ export default function ClassList({ profile }: ClassListProps) {
       unsubscribeCustomers();
       unsubscribeSubjects();
       unsubscribeSessions();
+      unsubscribeAttendance();
     };
   }, []);
 
@@ -193,7 +209,7 @@ export default function ClassList({ profile }: ClassListProps) {
         date: format(new Date(), 'yyyy-MM-dd'),
         startTime: '08:00',
         endTime: '09:30',
-        status: 'đang học',
+        status: 'chưa diễn ra',
       });
     } catch (error) {
       handleFirestoreError(error, editingSession ? OperationType.UPDATE : OperationType.CREATE, 'teaching_sessions');
@@ -219,6 +235,42 @@ export default function ClassList({ profile }: ClassListProps) {
       status: session.status,
     });
     setIsSessionModalOpen(true);
+  };
+
+  const openAttendanceModal = (session: TeachingSession) => {
+    setSelectedSessionForAttendance(session);
+    setIsAttendanceModalOpen(true);
+  };
+
+  const handleAttendanceChange = async (studentId: string, studentName: string, status: Attendance['status']) => {
+    if (!canMarkAttendance || !selectedSessionForAttendance || !profile) return;
+
+    const existingRecord = attendanceRecords.find(
+      r => r.sessionId === selectedSessionForAttendance.id && r.studentId === studentId
+    );
+
+    const data = {
+      status,
+      takenById: profile.uid,
+      takenByName: profile.displayName || profile.email || 'Unknown',
+      updatedAt: Date.now()
+    };
+
+    try {
+      if (existingRecord) {
+        await updateDoc(doc(db, 'attendance', existingRecord.id), data);
+      } else {
+        await addDoc(collection(db, 'attendance'), {
+          ...data,
+          sessionId: selectedSessionForAttendance.id,
+          classId: selectedSessionForAttendance.classId,
+          studentId,
+          studentName,
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, existingRecord ? OperationType.UPDATE : OperationType.CREATE, 'attendance');
+    }
   };
 
   const openEditModal = (cls: Class) => {
@@ -739,11 +791,11 @@ export default function ClassList({ profile }: ClassListProps) {
                           date: format(date, 'yyyy-MM-dd'),
                           startTime: '08:00',
                           endTime: '09:30',
-                          status: 'đang học',
+                          status: 'chưa diễn ra',
                         });
                         setIsSessionModalOpen(true);
                       }}
-                      className="absolute top-1 right-1 p-1 bg-[#2D5A4C] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      className="absolute bottom-1 right-1 p-1 bg-[#2D5A4C] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
                       title="Thêm buổi học"
                     >
                       <Plus className="w-3 h-3" />
@@ -754,24 +806,45 @@ export default function ClassList({ profile }: ClassListProps) {
                   .map((session, idx) => (
                     <div 
                       key={session.id} 
-                      onClick={() => isAdmin && openEditSessionModal(session)}
+                      onClick={() => {
+                        if (isAdmin) {
+                          openEditSessionModal(session);
+                        } else if (canMarkAttendance) {
+                          openAttendanceModal(session);
+                        }
+                      }}
                       className={`p-2 rounded-lg border text-xs shadow-sm transition-all hover:shadow-md relative group/item cursor-pointer ${
-                        session.status === 'đang học' ? 'bg-[#2D5A4C]/5 border-[#2D5A4C]/20 text-[#2D5A4C]' :
-                        session.status === 'kết thúc' ? 'bg-gray-50 border-gray-200 text-gray-400 grayscale' :
+                        session.status === 'hoàn thành' || session.status === 'đang học' ? 'bg-[#2D5A4C]/5 border-[#2D5A4C]/20 text-[#2D5A4C]' :
+                        session.status === 'kết thúc' || session.status === 'hủy' ? 'bg-gray-50 border-gray-200 text-gray-400 grayscale' :
                         'bg-yellow-50 border-yellow-200 text-yellow-700'
                       }`}
                     >
-                      {isAdmin && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteSession(session.id);
-                          }}
-                          className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover/item:opacity-100 transition-opacity shadow-md z-20 hover:bg-red-600"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
+                      <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
+                        {canMarkAttendance && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAttendanceModal(session);
+                            }}
+                            className="p-1.5 bg-green-500 text-white rounded-full shadow-md hover:bg-green-600"
+                            title="Điểm danh"
+                          >
+                            <Users className="w-3 h-3" />
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteSession(session.id);
+                            }}
+                            className="p-1.5 bg-red-500 text-white rounded-full shadow-md hover:bg-red-600"
+                            title="Xóa"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                       <div className="font-bold truncate" title={session.className}>{session.className}</div>
                       <div className="flex items-center gap-1 mt-1 text-[10px] opacity-80">
                         <Clock className="w-3 h-3" />
@@ -784,6 +857,84 @@ export default function ClassList({ profile }: ClassListProps) {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {isAttendanceModalOpen && selectedSessionForAttendance && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[70] backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#2D5A4C] text-white">
+              <div>
+                <h3 className="text-xl font-bold">Điểm danh buổi học</h3>
+                <p className="text-sm opacity-80">{selectedSessionForAttendance.className} - {format(new Date(selectedSessionForAttendance.date), 'dd/MM/yyyy')}</p>
+              </div>
+              <button onClick={() => setIsAttendanceModalOpen(false)} className="text-white/80 hover:text-white transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 max-h-[70vh] overflow-y-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Học viên</th>
+                    <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase text-center">Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {classes.find(c => c.id === selectedSessionForAttendance.classId)?.studentIds.map((studentId, index) => {
+                    const studentName = classes.find(c => c.id === selectedSessionForAttendance.classId)?.studentNames[index] || '';
+                    const record = attendanceRecords.find(r => r.sessionId === selectedSessionForAttendance.id && r.studentId === studentId);
+                    
+                    return (
+                      <tr key={studentId} className="hover:bg-gray-50/50">
+                        <td className="px-4 py-4">
+                          <div className="font-bold text-gray-900">{studentName}</div>
+                          {record && (
+                            <div className="text-[9px] text-gray-400 mt-0.5">
+                              Cập nhật bởi: {record.takenByName} lúc {format(new Date(record.updatedAt), 'HH:mm dd/MM')}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="flex justify-center gap-2">
+                            {(['có mặt', 'vắng mặt', 'muộn', 'phép'] as Attendance['status'][]).map((status) => (
+                              <button
+                                key={status}
+                                onClick={() => handleAttendanceChange(studentId, studentName, status)}
+                                className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase transition-all ${
+                                  record?.status === status
+                                    ? status === 'có mặt' ? 'bg-green-500 text-white' :
+                                      status === 'vắng mặt' ? 'bg-red-500 text-white' :
+                                      status === 'muộn' ? 'bg-yellow-500 text-white' :
+                                      'bg-blue-500 text-white'
+                                    : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                }`}
+                              >
+                                {status}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {(!classes.find(c => c.id === selectedSessionForAttendance.classId)?.studentIds.length) && (
+                <div className="text-center py-10 text-gray-500 italic">
+                  Lớp học này chưa có học viên.
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-100 flex justify-end">
+              <button
+                onClick={() => setIsAttendanceModalOpen(false)}
+                className="px-6 py-2 bg-[#2D5A4C] text-white rounded-lg hover:bg-[#1D4A3C] transition-colors font-bold"
+              >
+                Hoàn tất
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -801,7 +952,7 @@ export default function ClassList({ profile }: ClassListProps) {
                   date: format(new Date(), 'yyyy-MM-dd'),
                   startTime: '08:00',
                   endTime: '09:30',
-                  status: 'đang học',
+                  status: 'chưa diễn ra',
                 });
               }} className="text-white/80 hover:text-white transition-colors">
                 <X className="w-6 h-6" />
@@ -864,12 +1015,14 @@ export default function ClassList({ profile }: ClassListProps) {
                 <select
                   required
                   value={sessionFormData.status}
-                  onChange={(e) => setSessionFormData({ ...sessionFormData, status: e.target.value as Class['status'] })}
+                  onChange={(e) => setSessionFormData({ ...sessionFormData, status: e.target.value as SessionStatus })}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                 >
-                  <option value="đang học">Đang học</option>
-                  <option value="kết thúc">Kết thúc</option>
-                  <option value="tạm dừng">Tạm dừng</option>
+                  <option value="chưa diễn ra">Chưa diễn ra</option>
+                  <option value="hoàn thành">Hoàn thành</option>
+                  <option value="hủy">Hủy</option>
+                  <option value="đang học">Đang học (Lớp)</option>
+                  <option value="kết thúc">Kết thúc (Lớp)</option>
                 </select>
               </div>
               <div className="flex gap-3 pt-4">

@@ -19,11 +19,10 @@
       "properties": {
         "consultationDate": { "type": "number" },
         "fbLink": { "type": "string" },
-        "fbAccount": { "type": "string" },
         "name": { "type": "string" },
         "phone": { "type": "string" },
         "subject": { "type": "string" },
-        "status": { "type": "string", "enum": ["Chưa phản hồi", "Phân vân", "Đã chốt", "Khác"] },
+        "status": { "type": "string", "enum": ["Đã đóng tiền", "Đã cọc", "Đã chốt", "Phân vân", "Hẹn lại", "Khác"] },
         "notes": { "type": "string" },
         "closedAmount": { "type": "string" },
         "source": { "type": "string" },
@@ -139,6 +138,77 @@
         "createdAt": { "type": "number" }
       },
       "required": ["classId", "className", "subject", "teacherId", "teacherName", "date", "startTime", "endTime", "status", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Thông tin điểm danh học viên",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "classId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "status": { "type": "string", "enum": ["có mặt", "vắng mặt", "muộn", "phép"] },
+        "note": { "type": "string" },
+        "takenById": { "type": "string" },
+        "takenByName": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["sessionId", "classId", "studentId", "studentName", "status", "takenById", "takenByName", "updatedAt"]
+    },
+    "Receipt": {
+      "title": "Receipt",
+      "description": "Phiếu thu học phí khách hàng",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "receiptNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "subject": { "type": "string" },
+        "amount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "type": { "type": "string", "enum": ["cọc", "đóng tất", "đóng 100%"] },
+        "paymentMethod": { "type": "string", "enum": ["tiền mặt", "chuyển khoản", "khác"] },
+        "note": { "type": "string" },
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["customerId", "customerName", "customerPhone", "subject", "amount", "totalAmount", "remainingAmount", "type", "paymentMethod", "staffId", "staffName", "createdAt", "receiptNumber"]
+    },
+    "CenterInfo": {
+      "title": "Center Info",
+      "description": "Thông tin trung tâm hiển thị trên biên lai",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "website": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "address", "website", "updatedAt"]
+    },
+    "PaymentVoucher": {
+      "title": "Payment Voucher",
+      "description": "Phiếu chi tiền của trung tâm",
+      "type": "object",
+      "properties": {
+        "voucherNumber": { "type": "string" },
+        "category": { "type": "string", "enum": ["lương nhân viên", "lương giáo viên", "lương trợ giảng", "tiền nhà", "tiền điện", "tiền nước", "văn phòng phẩm", "marketing", "khác"] },
+        "recipientName": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "paymentMethod": { "type": "string", "enum": ["tiền mặt", "chuyển khoản", "khác"] },
+        "staffId": { "type": "string" },
+        "staffName": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["voucherNumber", "category", "recipientName", "amount", "description", "paymentMethod", "staffId", "staffName", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -177,6 +247,22 @@
     "/teaching_sessions/{sessionId}": {
       "schema": "TeachingSession",
       "description": "Specific teaching session records"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Attendance records"
+    },
+    "/receipts/{receiptId}": {
+      "schema": "Receipt",
+      "description": "Receipt records"
+    },
+    "/center_info/{id}": {
+      "schema": "CenterInfo",
+      "description": "Center information for receipts"
+    },
+    "/payment_vouchers/{voucherId}": {
+      "schema": "PaymentVoucher",
+      "description": "Payment voucher records"
     }
   }
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { auth, db, signInWithGoogle, logout } from './firebase';
-import { UserProfile, Customer, Appointment } from './types';
+import { UserProfile, Customer, Appointment, Receipt, PaymentVoucher, TeachingSession, Attendance } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CustomerList from './components/CustomerList';
@@ -13,6 +13,11 @@ import { LogIn, Loader2, AlertCircle } from 'lucide-react';
 import TeacherList from './components/TeacherList';
 import TAList from './components/TAList';
 import ClassList from './components/ClassList';
+import AttendanceManager from './components/AttendanceManager';
+import ReceiptManager from './components/ReceiptManager';
+import PaymentVoucherManager from './components/PaymentVoucherManager';
+import Reports from './components/Reports';
+import Settings from './components/Settings';
 
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -22,6 +27,14 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [error, setError] = useState<string | null>(null);
+
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [paymentVouchers, setPaymentVouchers] = useState<PaymentVoucher[]>([]);
+  const [teachingSessions, setTeachingSessions] = useState<TeachingSession[]>([]);
+  const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [staff, setStaff] = useState<UserProfile[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -56,6 +69,61 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+
+    const qCustomers = profile.role === 'admin'
+      ? query(collection(db, 'customers'), orderBy('createdAt', 'desc'))
+      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid), orderBy('createdAt', 'desc'));
+    
+    const unsubscribeCustomers = onSnapshot(qCustomers, (snapshot) => {
+      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
+    });
+
+    const qAppointments = profile.role === 'admin'
+      ? query(collection(db, 'appointments'), orderBy('time', 'asc'))
+      : query(collection(db, 'appointments'), where('staffId', '==', profile.uid), orderBy('time', 'asc'));
+
+    const unsubscribeAppointments = onSnapshot(qAppointments, (snapshot) => {
+      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
+    });
+
+    const qReceipts = query(collection(db, 'receipts'), orderBy('createdAt', 'desc'));
+    const unsubscribeReceipts = onSnapshot(qReceipts, (snapshot) => {
+      setReceipts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Receipt)));
+    });
+
+    const qPayments = query(collection(db, 'payment_vouchers'), orderBy('createdAt', 'desc'));
+    const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
+      setPaymentVouchers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentVoucher)));
+    });
+
+    const qSessions = query(collection(db, 'teaching_sessions'), orderBy('date', 'desc'));
+    const unsubscribeSessions = onSnapshot(qSessions, (snapshot) => {
+      setTeachingSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingSession)));
+    });
+
+    const qAttendance = query(collection(db, 'attendance'));
+    const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
+      setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
+    });
+
+    const qStaff = query(collection(db, 'users'));
+    const unsubscribeStaff = onSnapshot(qStaff, (snapshot) => {
+      setStaff(snapshot.docs.map(doc => doc.data() as UserProfile));
+    });
+
+    return () => {
+      unsubscribeCustomers();
+      unsubscribeAppointments();
+      unsubscribeReceipts();
+      unsubscribePayments();
+      unsubscribeSessions();
+      unsubscribeAttendance();
+      unsubscribeStaff();
+    };
+  }, [profile]);
 
   if (loading) {
     return (
@@ -112,6 +180,21 @@ export default function App() {
             {activeTab === 'teachers' && <TeacherList profile={profile} />}
             {activeTab === 'tas' && <TAList profile={profile} />}
             {activeTab === 'classes' && <ClassList profile={profile} />}
+            {activeTab === 'attendance' && <AttendanceManager profile={profile} />}
+            {activeTab === 'receipts' && <ReceiptManager profile={profile} />}
+            {activeTab === 'payments' && <PaymentVoucherManager profile={profile} />}
+            {activeTab === 'reports' && (
+              <Reports 
+                customers={customers} 
+                appointments={appointments} 
+                staff={staff} 
+                receipts={receipts}
+                paymentVouchers={paymentVouchers}
+                teachingSessions={teachingSessions}
+                attendance={attendance}
+              />
+            )}
+            {activeTab === 'settings' && <Settings profile={profile} />}
           </div>
         </main>
       </div>

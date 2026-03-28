@@ -97,7 +97,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [viewMode, setViewMode] = useState<'calendar' | 'table'>('calendar');
+  const [viewMode, setViewMode] = useState<'calendar' | 'table'>('table');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -121,7 +121,11 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
       setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
     });
 
-    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
+    const qCustomers = profile.role === 'admin'
+      ? query(collection(db, 'customers'), orderBy('name', 'asc'))
+      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid), orderBy('name', 'asc'));
+
+    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
     });
 

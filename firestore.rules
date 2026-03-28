@@ -19,11 +19,10 @@ service cloud.firestore {
     // Fields:
     //   - consultationDate: number
     //   - fbLink: string
-    //   - fbAccount: string
     //   - name: string (required)
     //   - phone: string
     //   - subject: string
-    //   - status: string (required, enum: ['Chưa phản hồi', 'Phân vân', 'Đã chốt', 'Khác'])
+    //   - status: string (required, enum: ['Đã đóng tiền', 'Đã cọc', 'Đã chốt', 'Phân vân', 'Hẹn lại', 'Khác'])
     //   - notes: string
     //   - closedAmount: string
     //   - source: string
@@ -110,6 +109,14 @@ service cloud.firestore {
     //   - status: string (required, enum: ['đang học', 'kết thúc', 'tạm dừng'])
     //   - createdAt: number (required)
     //
+    // Collection: center_info
+    // Document ID: auto-generated (usually 'default')
+    // Fields:
+    //   - name: string (required)
+    //   - address: string (required)
+    //   - website: string (required)
+    //   - updatedAt: number (required)
+    //
     // ===============================================================
 
     // ===============================================================
@@ -126,31 +133,41 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "nguyentamito@gmail.com" && request.auth.token.email_verified == true));
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          request.auth.token.email == "nguyentamito@gmail.com"
+        );
     }
 
     function isStaff() {
-      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff';
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher';
     }
 
     // Domain Validators
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'displayName', 'role']) &&
              data.uid is string && data.email is string && data.displayName is string &&
-             data.role in ['admin', 'staff'];
+             data.role in ['admin', 'staff', 'teacher'];
     }
 
     function isValidCustomer(data) {
       return data.keys().hasAll(['name', 'status', 'ownerId', 'ownerName', 'createdAt', 'updatedAt']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.status in ['Chưa phản hồi', 'Phân vân', 'Đã chốt', 'Khác'] &&
+             data.status in ['Đã đóng tiền', 'Đã cọc', 'Đã chốt', 'Phân vân', 'Hẹn lại', 'Khác'] &&
              data.ownerId is string &&
              data.ownerName is string && data.ownerName.size() > 0 && data.ownerName.size() < 100 &&
              data.createdAt is number && data.updatedAt is number &&
              (!('consultationDate' in data) || data.consultationDate is number) &&
              (!('fbLink' in data) || data.fbLink is string) &&
-             (!('fbAccount' in data) || data.fbAccount is string) &&
              (!('phone' in data) || data.phone is string) &&
              (!('subject' in data) || data.subject is string) &&
              (!('notes' in data) || data.notes is string) &&
@@ -216,6 +233,47 @@ service cloud.firestore {
              (!('taName' in data) || data.taName is string);
     }
 
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['sessionId', 'classId', 'studentId', 'studentName', 'status', 'takenById', 'takenByName', 'updatedAt']) &&
+             data.sessionId is string && data.classId is string && data.studentId is string &&
+             data.studentName is string && data.status in ['có mặt', 'vắng mặt', 'muộn', 'phép'] &&
+             data.takenById is string && data.takenByName is string &&
+             data.updatedAt is number &&
+             (!('note' in data) || data.note is string);
+    }
+
+    function isValidReceipt(data) {
+      return data.keys().hasAll(['customerId', 'customerName', 'customerPhone', 'subject', 'amount', 'totalAmount', 'remainingAmount', 'type', 'paymentMethod', 'staffId', 'staffName', 'createdAt', 'receiptNumber']) &&
+             data.customerId is string && data.customerName is string && data.customerPhone is string &&
+             data.receiptNumber is string &&
+             data.subject is string && data.amount is number && data.totalAmount is number &&
+             data.remainingAmount is number &&
+             data.type in ['cọc', 'đóng tất', 'đóng 100%'] &&
+             data.paymentMethod in ['tiền mặt', 'chuyển khoản', 'khác'] &&
+             data.staffId is string && data.staffName is string && data.createdAt is number &&
+             (!('note' in data) || data.note is string);
+    }
+
+    function isValidCenterInfo(data) {
+      return data.keys().hasAll(['name', 'address', 'website', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.address is string && data.address.size() > 0 &&
+             data.website is string && data.updatedAt is number;
+    }
+
+    function isValidPaymentVoucher(data) {
+      return data.keys().hasAll(['voucherNumber', 'category', 'recipientName', 'amount', 'description', 'paymentMethod', 'staffId', 'staffName', 'createdAt', 'updatedAt']) &&
+             data.voucherNumber is string &&
+             data.category in ['lương nhân viên', 'lương giáo viên', 'lương trợ giảng', 'tiền nhà', 'tiền điện', 'tiền nước', 'văn phòng phẩm', 'marketing', 'khác'] &&
+             data.recipientName is string && data.recipientName.size() > 0 &&
+             data.amount is number && data.amount > 0 &&
+             data.description is string &&
+             data.paymentMethod in ['tiền mặt', 'chuyển khoản', 'khác'] &&
+             data.staffId is string && data.staffName is string &&
+             data.createdAt is number && data.updatedAt is number &&
+             (!('recipientId' in data) || data.recipientId is string);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -278,6 +336,31 @@ service cloud.firestore {
     match /teaching_sessions/{sessionId} {
       allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidTeachingSession(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (isAdmin() || isStaff() || isTeacher()) && isValidAttendance(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /receipts/{receiptId} {
+      allow read: if isAuthenticated();
+      allow create: if (isAdmin() || isStaff()) && isValidReceipt(request.resource.data);
+      allow update: if isAdmin() && isValidReceipt(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /center_info/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidCenterInfo(request.resource.data);
+    }
+
+    match /payment_vouchers/{voucherId} {
+      allow read: if isAuthenticated();
+      allow create: if (isAdmin() || isStaff()) && isValidPaymentVoucher(request.resource.data);
+      allow update: if isAdmin() && isValidPaymentVoucher(request.resource.data);
       allow delete: if isAdmin();
     }
   }

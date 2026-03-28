@@ -7,11 +7,12 @@ import {
   Trash2,
   History,
   MessageSquare,
-  ExternalLink
+  ExternalLink,
+  Receipt as ReceiptIcon
 } from 'lucide-react';
 import { collection, query, onSnapshot, where, addDoc, updateDoc, deleteDoc, doc, orderBy, limit } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Customer, UserProfile, CustomerStatus, Interaction, InteractionStatus, Subject } from '../types';
+import { Customer, UserProfile, CustomerStatus, CustomerSource, Interaction, InteractionStatus, Subject, ReceiptType, PaymentMethod, Receipt } from '../types';
 import { cn, formatDate, formatOnlyDate, formatNumber } from '../lib/utils';
 import InteractionTimeline from './InteractionTimeline';
 
@@ -73,6 +74,7 @@ interface CustomerListProps {
 export default function CustomerList({ profile }: CustomerListProps) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [interactions, setInteractions] = useState<Record<string, Interaction>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -81,7 +83,14 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [isQuickNoteOpen, setIsQuickNoteOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState<string | null>(null);
+  const [receiptData, setReceiptData] = useState({
+    amount: 0,
+    type: 'đóng 100%' as ReceiptType,
+    paymentMethod: 'chuyển khoản' as PaymentMethod,
+    note: ''
+  });
   const [quickNoteData, setQuickNoteData] = useState({
     content: '',
     status: 'đã liên hệ' as InteractionStatus,
@@ -91,14 +100,13 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const [formData, setFormData] = useState({
     consultationDate: Date.now(),
     fbLink: '',
-    fbAccount: '',
     name: '',
     phone: '',
     subject: '',
-    status: 'Chưa phản hồi' as CustomerStatus,
+    status: 'Phân vân' as CustomerStatus,
     notes: '',
     closedAmount: '',
-    source: 'Chạy quảng cáo FB',
+    source: 'Facebook' as CustomerSource,
     initialInteraction: '',
     appointmentTime: 0,
     appointmentContent: ''
@@ -138,12 +146,62 @@ export default function CustomerList({ profile }: CustomerListProps) {
       handleFirestoreError(error, OperationType.GET, 'subjects');
     });
 
+    const unsubReceipts = onSnapshot(collection(db, 'receipts'), (snapshot) => {
+      setReceipts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Receipt)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'receipts');
+    });
+
     return () => {
       unsub();
       unsubInteractions();
       unsubSubjects();
+      unsubReceipts();
     };
   }, [profile]);
+
+  const handleCreateReceipt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !selectedCustomer) return;
+
+    const totalAmount = parseInt(selectedCustomer.closedAmount.replace(/\D/g, '')) || 0;
+    
+    // Calculate total already paid by this customer
+    const totalPaid = receipts
+      .filter(r => r.customerId === selectedCustomer.id)
+      .reduce((sum, r) => sum + r.amount, 0);
+    
+    const remainingAmount = totalAmount - totalPaid - receiptData.amount;
+
+    const data = {
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      customerPhone: selectedCustomer.phone,
+      subject: selectedCustomer.subject,
+      amount: receiptData.amount,
+      totalAmount: totalAmount,
+      remainingAmount: remainingAmount,
+      type: receiptData.type,
+      paymentMethod: receiptData.paymentMethod,
+      note: receiptData.note,
+      staffId: profile.uid,
+      staffName: profile.displayName || profile.email,
+      createdAt: Date.now()
+    };
+
+    try {
+      await addDoc(collection(db, 'receipts'), data);
+      setIsReceiptModalOpen(false);
+      setReceiptData({
+        amount: 0,
+        type: 'đóng 100%',
+        paymentMethod: 'chuyển khoản',
+        note: ''
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'receipts');
+    }
+  };
 
   const filteredCustomers = customers.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -210,14 +268,13 @@ export default function CustomerList({ profile }: CustomerListProps) {
       setFormData({
         consultationDate: Date.now(),
         fbLink: '',
-        fbAccount: '',
         name: '',
         phone: '',
         subject: '',
-        status: 'Chưa phản hồi',
+        status: 'Phân vân',
         notes: '',
         closedAmount: '',
-        source: 'Chạy quảng cáo FB',
+        source: 'Facebook' as CustomerSource,
         initialInteraction: '',
         appointmentTime: 0,
         appointmentContent: ''
@@ -275,7 +332,6 @@ export default function CustomerList({ profile }: CustomerListProps) {
     setFormData({
       consultationDate: customer.consultationDate || Date.now(),
       fbLink: customer.fbLink || '',
-      fbAccount: customer.fbAccount || '',
       name: customer.name,
       phone: customer.phone,
       subject: customer.subject || '',
@@ -293,9 +349,11 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const getStatusBadge = (status: CustomerStatus) => {
     const base = "px-3 py-1 rounded-full text-xs font-medium inline-flex items-center justify-center min-w-[100px]";
     switch (status) {
-      case 'Chưa phản hồi': return <span className={cn(base, "bg-orange-100 text-orange-700 border border-orange-200")}>Chưa phản hồi</span>;
-      case 'Phân vân': return <span className={cn(base, "bg-blue-100 text-blue-700 border border-blue-200")}>Phân vân</span>;
-      case 'Đã chốt': return <span className={cn(base, "bg-green-100 text-green-700 border border-green-200")}>Đã chốt</span>;
+      case 'Đã đóng tiền': return <span className={cn(base, "bg-emerald-100 text-emerald-700 border border-emerald-200")}>Đã đóng tiền</span>;
+      case 'Đã cọc': return <span className={cn(base, "bg-green-100 text-green-700 border border-green-200")}>Đã cọc</span>;
+      case 'Đã chốt': return <span className={cn(base, "bg-blue-100 text-blue-700 border border-blue-200")}>Đã chốt</span>;
+      case 'Phân vân': return <span className={cn(base, "bg-orange-100 text-orange-700 border border-orange-200")}>Phân vân</span>;
+      case 'Hẹn lại': return <span className={cn(base, "bg-purple-100 text-purple-700 border border-purple-200")}>Hẹn lại</span>;
       case 'Khác': return <span className={cn(base, "bg-gray-100 text-gray-700 border border-gray-200")}>Khác</span>;
     }
   };
@@ -313,14 +371,13 @@ export default function CustomerList({ profile }: CustomerListProps) {
             setFormData({
               consultationDate: Date.now(),
               fbLink: '',
-              fbAccount: '',
               name: '',
               phone: '',
               subject: '',
-              status: 'Chưa phản hồi',
+              status: 'Phân vân',
               notes: '',
               closedAmount: '',
-              source: 'Chạy quảng cáo FB',
+              source: 'Facebook' as CustomerSource,
               initialInteraction: '',
               appointmentTime: 0,
               appointmentContent: ''
@@ -353,9 +410,11 @@ export default function CustomerList({ profile }: CustomerListProps) {
             className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           >
             <option value="all">Tất cả trạng thái</option>
-            <option value="Chưa phản hồi">Chưa phản hồi</option>
-            <option value="Phân vân">Phân vân</option>
+            <option value="Đã đóng tiền">Đã đóng tiền</option>
+            <option value="Đã cọc">Đã cọc</option>
             <option value="Đã chốt">Đã chốt</option>
+            <option value="Phân vân">Phân vân</option>
+            <option value="Hẹn lại">Hẹn lại</option>
             <option value="Khác">Khác</option>
           </select>
         </div>
@@ -367,8 +426,6 @@ export default function CustomerList({ profile }: CustomerListProps) {
             <thead>
               <tr className="bg-[#2D5A4C] border-b border-[#2D5A4C]">
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Ngày Tư vấn</th>
-                <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Link FB</th>
-                <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Tài khoản FB</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Họ Tên</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Sđt</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Môn</th>
@@ -387,18 +444,14 @@ export default function CustomerList({ profile }: CustomerListProps) {
                     <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
                       {customer.consultationDate ? formatOnlyDate(customer.consultationDate) : ''}
                     </td>
-                    <td className="px-4 py-3 text-sm text-blue-600 border-r border-gray-100">
-                      {customer.fbLink && (
-                        <a href={customer.fbLink} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1">
-                          Link <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900 border-r border-gray-100">
-                      {customer.fbAccount}
-                    </td>
                     <td className="px-4 py-3 text-sm text-gray-900 border-r border-gray-100">
-                      {customer.name}
+                      {customer.fbLink ? (
+                        <a href={customer.fbLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-1">
+                          {customer.name} <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        customer.name
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
                       {customer.phone}
@@ -443,6 +496,25 @@ export default function CustomerList({ profile }: CustomerListProps) {
                         >
                           <History className="w-4 h-4" />
                         </button>
+                        {customer.status === 'Đã chốt' && (
+                          <button 
+                            onClick={() => {
+                              setSelectedCustomer(customer);
+                              const totalAmount = parseInt(customer.closedAmount.replace(/\D/g, '')) || 0;
+                              const totalPaid = receipts
+                                .filter(r => r.customerId === customer.id)
+                                .reduce((sum, r) => sum + r.amount, 0);
+                              
+                              const remaining = totalAmount - totalPaid;
+                              setReceiptData({ ...receiptData, amount: remaining > 0 ? remaining : 0 });
+                              setIsReceiptModalOpen(true);
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                            title="Tạo phiếu thu"
+                          >
+                            <ReceiptIcon className="w-4 h-4" />
+                          </button>
+                        )}
                         <button 
                           onClick={() => openEditModal(customer)}
                           className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
@@ -513,15 +585,6 @@ export default function CustomerList({ profile }: CustomerListProps) {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-gray-700">Tài khoản FB</label>
-                    <input
-                      type="text"
-                      value={formData.fbAccount}
-                      onChange={(e) => setFormData({...formData, fbAccount: e.target.value})}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700">Họ tên *</label>
                     <input
                       required
@@ -531,8 +594,6 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700">Số điện thoại</label>
                     <input
@@ -542,6 +603,8 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700">Môn học</label>
                     <select
@@ -555,8 +618,6 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       ))}
                     </select>
                   </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700">Trạng thái</label>
                     <select
@@ -564,12 +625,16 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       onChange={(e) => setFormData({...formData, status: e.target.value as CustomerStatus})}
                       className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="Chưa phản hồi">Chưa phản hồi</option>
-                      <option value="Phân vân">Phân vân</option>
+                      <option value="Đã đóng tiền">Đã đóng tiền</option>
+                      <option value="Đã cọc">Đã cọc</option>
                       <option value="Đã chốt">Đã chốt</option>
+                      <option value="Phân vân">Phân vân</option>
+                      <option value="Hẹn lại">Hẹn lại</option>
                       <option value="Khác">Khác</option>
                     </select>
                   </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-gray-700">Số tiền đã chốt</label>
                     <input
@@ -583,15 +648,21 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-700">Nguồn Data</label>
-                  <input
-                    type="text"
-                    value={formData.source}
-                    onChange={(e) => setFormData({...formData, source: e.target.value})}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-700">Nguồn Data</label>
+                    <select
+                      value={formData.source}
+                      onChange={(e) => setFormData({...formData, source: e.target.value as CustomerSource})}
+                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="Facebook">Facebook</option>
+                      <option value="Tiktok">Tiktok</option>
+                      <option value="CTV Online">CTV Online</option>
+                      <option value="Được giới thiệu">Được giới thiệu</option>
+                      <option value="Học viên tự đến">Học viên tự đến</option>
+                      <option value="Khác">Khác</option>
+                    </select>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-700">Ghi chú</label>
@@ -658,6 +729,121 @@ export default function CustomerList({ profile }: CustomerListProps) {
                   className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium shadow-sm"
                 >
                   {selectedCustomer ? 'Cập nhật' : 'Lưu khách hàng'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Receipt Modal */}
+      {isReceiptModalOpen && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-[#2D5A4C] text-white">
+              <h3 className="text-xl font-bold">Tạo Phiếu Thu</h3>
+              <button onClick={() => setIsReceiptModalOpen(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateReceipt} className="p-6 space-y-4">
+              <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <p className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-2">Thông tin khách hàng</p>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-bold text-gray-900">{selectedCustomer.name}</p>
+                    <p className="text-sm text-gray-600">{selectedCustomer.phone}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-[#2D5A4C]">{selectedCustomer.subject}</p>
+                    <p className="text-xs text-gray-500">Môn học</p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-gray-200 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500">Học phí đã chốt</p>
+                    <p className="font-bold text-gray-900">{formatNumber(selectedCustomer.closedAmount)} VNĐ</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Đã thu trước đó</p>
+                    <p className="font-bold text-blue-600">
+                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id).reduce((sum, r) => sum + r.amount, 0))} VNĐ
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền thu (VNĐ) *</label>
+                  <input
+                    type="number"
+                    required
+                    value={receiptData.amount}
+                    onChange={(e) => setReceiptData({ ...receiptData, amount: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Loại thu *</label>
+                  <select
+                    required
+                    value={receiptData.type}
+                    onChange={(e) => setReceiptData({ ...receiptData, type: e.target.value as ReceiptType })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  >
+                    <option value="cọc">Cọc</option>
+                    <option value="đóng tất">Đóng tất</option>
+                    <option value="đóng 100%">Đóng 100%</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Hình thức thanh toán *</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['tiền mặt', 'chuyển khoản', 'khác'] as PaymentMethod[]).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setReceiptData({ ...receiptData, paymentMethod: method })}
+                      className={cn(
+                        "py-2 px-3 text-sm rounded-lg border transition-all capitalize",
+                        receiptData.paymentMethod === method 
+                          ? "bg-[#2D5A4C] text-white border-[#2D5A4C]" 
+                          : "bg-white text-gray-600 border-gray-200 hover:border-[#2D5A4C]"
+                      )}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ghi chú</label>
+                <textarea
+                  value={receiptData.note}
+                  onChange={(e) => setReceiptData({ ...receiptData, note: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  rows={3}
+                  placeholder="Thông tin thêm về khoản thu..."
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsReceiptModalOpen(false)}
+                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-[#2D5A4C] text-white rounded-lg hover:bg-[#23463a] transition-colors font-medium"
+                >
+                  Lưu phiếu thu
                 </button>
               </div>
             </form>

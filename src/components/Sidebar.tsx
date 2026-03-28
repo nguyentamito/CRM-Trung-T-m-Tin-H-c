@@ -7,7 +7,12 @@ import {
   User as UserIcon,
   ChevronRight,
   MessageSquare,
-  BookOpen
+  BookOpen,
+  CheckCircle2,
+  Receipt as ReceiptIcon,
+  Settings as SettingsIcon,
+  BarChart3,
+  CreditCard
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { cn } from '../lib/utils';
@@ -24,6 +29,11 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'customers', label: 'Khách hàng', icon: Users },
     { id: 'appointments', label: 'Lịch hẹn', icon: Calendar },
+    { id: 'attendance', label: 'Điểm danh', icon: CheckCircle2 },
+    { id: 'receipts', label: 'Phiếu thu', icon: ReceiptIcon },
+    { id: 'payments', label: 'Phiếu chi', icon: CreditCard },
+    { id: 'reports', label: 'Báo cáo', icon: BarChart3 },
+    { id: 'settings', label: 'Cài đặt', icon: SettingsIcon },
   ];
 
   if (profile?.role === 'admin') {

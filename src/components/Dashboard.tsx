@@ -126,13 +126,15 @@ export default function Dashboard({ profile }: DashboardProps) {
   ];
 
   const statusData = [
-    { name: 'Chưa phản hồi', value: customers.filter(c => c.status === 'Chưa phản hồi').length },
-    { name: 'Phân vân', value: customers.filter(c => c.status === 'Phân vân').length },
+    { name: 'Đã đóng tiền', value: customers.filter(c => c.status === 'Đã đóng tiền').length },
+    { name: 'Đã cọc', value: customers.filter(c => c.status === 'Đã cọc').length },
     { name: 'Đã chốt', value: customers.filter(c => c.status === 'Đã chốt').length },
+    { name: 'Phân vân', value: customers.filter(c => c.status === 'Phân vân').length },
+    { name: 'Hẹn lại', value: customers.filter(c => c.status === 'Hẹn lại').length },
     { name: 'Khác', value: customers.filter(c => c.status === 'Khác').length },
   ];
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
+  const COLORS = ['#10b981', '#34d399', '#3b82f6', '#f59e0b', '#8b5cf6', '#94a3b8'];
 
   const monthlyData = [
     { name: 'T1', value: 40 },
