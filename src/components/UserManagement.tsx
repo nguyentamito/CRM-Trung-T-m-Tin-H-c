@@ -1,13 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  doc, 
-  updateDoc,
-  orderBy
-} from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { UserProfile } from '../types';
 import { 
   Users, 
@@ -33,18 +24,21 @@ export default function UserManagement({ profile }: UserManagementProps) {
 
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('/api/users');
+      const data = await response.json();
+      setUsers(Array.isArray(data) ? data : []);
+      setLoading(false);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!profile || profile.role !== 'admin') return;
-
-    const q = query(collection(db, 'users'), orderBy('displayName', 'asc'));
-    const unsub = onSnapshot(q, (snapshot) => {
-      setUsers(snapshot.docs.map(doc => doc.data() as UserProfile));
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'users');
-    });
-
-    return () => unsub();
+    fetchUsers();
   }, [profile]);
 
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
@@ -54,12 +48,17 @@ export default function UserManagement({ profile }: UserManagementProps) {
     if (!tempName.trim()) return;
     setUpdatingId(userId);
     try {
-      await updateDoc(doc(db, 'users', userId), {
-        displayName: tempName.trim()
+      await fetch(`/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName: tempName.trim()
+        })
       });
       setEditingNameId(null);
+      fetchUsers();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      console.error("Error updating name:", error);
     } finally {
       setUpdatingId(null);
     }
@@ -73,11 +72,16 @@ export default function UserManagement({ profile }: UserManagementProps) {
 
     setUpdatingId(userId);
     try {
-      await updateDoc(doc(db, 'users', userId), {
-        [field]: value
+      await fetch(`/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [field]: value
+        })
       });
+      fetchUsers();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      console.error("Error updating status:", error);
     } finally {
       setUpdatingId(null);
     }

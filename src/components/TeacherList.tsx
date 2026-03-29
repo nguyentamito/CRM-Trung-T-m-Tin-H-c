@@ -1,15 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  orderBy 
-} from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { Teacher, Subject, UserProfile } from '../types';
 import { 
   Plus, 
@@ -42,38 +31,54 @@ export default function TeacherList({ profile }: TeacherListProps) {
     subjects: [] as string[],
   });
 
+  const fetchData = async () => {
+    try {
+      const [teachersRes, subjectsRes] = await Promise.all([
+        fetch('/api/teachers'),
+        fetch('/api/subjects')
+      ]);
+      const [teachersData, subjectsData] = await Promise.all([
+        teachersRes.json(),
+        subjectsRes.json()
+      ]);
+      setTeachers(Array.isArray(teachersData) ? teachersData : []);
+      setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
+    } catch (error) {
+      console.error('Error fetching teacher data:', error);
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'teachers'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTeachers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Teacher)));
-    });
-
-    const qSub = query(collection(db, 'subjects'), orderBy('name', 'asc'));
-    const unsubscribeSub = onSnapshot(qSub, (snapshot) => {
-      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject)));
-    });
-
-    return () => {
-      unsubscribe();
-      unsubscribeSub();
-    };
+    fetchData();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
 
+    const data = {
+      ...formData,
+      subjects: JSON.stringify(formData.subjects)
+    };
+
     try {
       if (editingTeacher) {
-        await updateDoc(doc(db, 'teachers', editingTeacher.id), {
-          ...formData,
+        await fetch(`/api/teachers/${editingTeacher.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
         });
       } else {
-        await addDoc(collection(db, 'teachers'), {
-          ...formData,
-          createdAt: Date.now(),
+        await fetch('/api/teachers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...data,
+            createdAt: Date.now(),
+          })
         });
       }
+      fetchData();
       closeModal();
     } catch (error) {
       console.error('Error saving teacher:', error);
@@ -83,7 +88,8 @@ export default function TeacherList({ profile }: TeacherListProps) {
   const handleDelete = async (id: string) => {
     if (!isAdmin || !window.confirm('Bạn có chắc muốn xóa giáo viên này?')) return;
     try {
-      await deleteDoc(doc(db, 'teachers', id));
+      await fetch(`/api/teachers/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (error) {
       console.error('Error deleting teacher:', error);
     }

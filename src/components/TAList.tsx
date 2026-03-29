@@ -1,15 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  orderBy 
-} from 'firebase/firestore';
-import { db } from '../firebase';
 import { TeachingAssistant, UserProfile } from '../types';
 import { 
   Plus, 
@@ -39,13 +28,18 @@ export default function TAList({ profile }: TAListProps) {
     email: '',
   });
 
-  useEffect(() => {
-    const q = query(collection(db, 'teaching_assistants'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTAs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingAssistant)));
-    });
+  const fetchData = async () => {
+    try {
+      const res = await fetch('/api/teaching_assistants');
+      const data = await res.json();
+      setTAs(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Error fetching TA data:', error);
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,15 +48,22 @@ export default function TAList({ profile }: TAListProps) {
 
     try {
       if (editingTA) {
-        await updateDoc(doc(db, 'teaching_assistants', editingTA.id), {
-          ...formData,
+        await fetch(`/api/teaching_assistants/${editingTA.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
         });
       } else {
-        await addDoc(collection(db, 'teaching_assistants'), {
-          ...formData,
-          createdAt: Date.now(),
+        await fetch('/api/teaching_assistants', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...formData,
+            createdAt: Date.now(),
+          })
         });
       }
+      fetchData();
       closeModal();
     } catch (error) {
       console.error('Error saving TA:', error);
@@ -72,7 +73,8 @@ export default function TAList({ profile }: TAListProps) {
   const handleDelete = async (id: string) => {
     if (!isAdmin || !window.confirm('Bạn có chắc muốn xóa trợ giảng này?')) return;
     try {
-      await deleteDoc(doc(db, 'teaching_assistants', id));
+      await fetch(`/api/teaching_assistants/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (error) {
       console.error('Error deleting TA:', error);
     }

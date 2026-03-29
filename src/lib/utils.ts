@@ -6,21 +6,33 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatDate(date: Date | string | number) {
-  return new Intl.DateTimeFormat('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(date));
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return 'N/A';
+    return new Intl.DateTimeFormat('vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  } catch (e) {
+    return 'N/A';
+  }
 }
 
 export function formatOnlyDate(date: Date | string | number) {
-  return new Intl.DateTimeFormat('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }).format(new Date(date));
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return 'N/A';
+    return new Intl.DateTimeFormat('vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(d);
+  } catch (e) {
+    return 'N/A';
+  }
 }
 
 export function formatNumber(value: string | number) {
@@ -28,6 +40,28 @@ export function formatNumber(value: string | number) {
   const num = typeof value === 'string' ? parseFloat(value.replace(/[^0-9.-]+/g, "")) : value;
   if (isNaN(num)) return value.toString();
   return new Intl.NumberFormat('vi-VN').format(num);
+}
+
+export function safeGetISODate(date: Date | string | number) {
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return new Date().toISOString().split('T')[0];
+    return d.toISOString().split('T')[0];
+  } catch (e) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+export function safeGetISODateTime(date: Date | string | number) {
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '';
+    // Adjust for timezone offset to get local time for datetime-local input
+    const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+    return localDate.toISOString().slice(0, 16);
+  } catch (e) {
+    return '';
+  }
 }
 
 export function numberToVietnameseWords(number: number): string {

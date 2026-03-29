@@ -8,62 +8,9 @@ import {
   XCircle, 
   AlertCircle 
 } from 'lucide-react';
-import { collection, query, onSnapshot, where, addDoc, orderBy, updateDoc, doc } from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { Customer, Interaction, UserProfile, InteractionStatus } from '../types';
 import { cn, formatDate } from '../lib/utils';
 import ReactMarkdown from 'react-markdown';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 interface InteractionTimelineProps {
   customer: Customer;
@@ -77,20 +24,18 @@ export default function InteractionTimeline({ customer, profile, onClose }: Inte
   const [newNotes, setNewNotes] = useState('');
   const [newStatus, setNewStatus] = useState<InteractionStatus>('đã liên hệ');
 
+  const fetchInteractions = async () => {
+    try {
+      const response = await fetch(`/api/interactions?customerId=${customer.id}`);
+      const data = await response.json();
+      setInteractions(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Error fetching interactions:", error);
+    }
+  };
+
   useEffect(() => {
-    const q = query(
-      collection(db, 'interactions'), 
-      where('customerId', '==', customer.id),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsub = onSnapshot(q, (snapshot) => {
-      setInteractions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Interaction)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'interactions');
-    });
-
-    return () => unsub();
+    fetchInteractions();
   }, [customer.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,24 +43,33 @@ export default function InteractionTimeline({ customer, profile, onClose }: Inte
     if (!profile || !newContent.trim()) return;
 
     try {
-      await addDoc(collection(db, 'interactions'), {
-        customerId: customer.id,
-        content: newContent,
-        notes: newNotes,
-        status: newStatus,
-        staffId: profile.uid,
-        createdAt: Date.now()
+      await fetch('/api/interactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: customer.id,
+          content: newContent,
+          notes: newNotes,
+          status: newStatus,
+          staffId: profile.uid,
+          createdAt: Date.now()
+        })
       });
 
       // Update customer's updatedAt
-      await updateDoc(doc(db, 'customers', customer.id), {
-        updatedAt: Date.now()
+      await fetch(`/api/customers/${customer.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          updatedAt: Date.now()
+        })
       });
 
       setNewContent('');
       setNewNotes('');
+      fetchInteractions();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'interactions');
+      console.error("Error submitting interaction:", err);
     }
   };
 

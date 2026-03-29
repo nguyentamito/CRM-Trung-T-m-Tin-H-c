@@ -44,24 +44,32 @@ export default function App() {
         setUser(user);
         try {
           const isAdmin = user.email?.toLowerCase() === 'nguyentamito@gmail.com';
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
           
-          if (userDoc.exists()) {
-            const existingProfile = userDoc.data() as UserProfile;
+          // Try to fetch profile from MySQL
+          const res = await fetch(`/api/users?uid=${user.uid}`);
+          const users = await res.json();
+          const existingProfile = Array.isArray(users) ? users.find((u: any) => u.uid === user.uid) : null;
+          
+          if (existingProfile) {
             // Ensure admin is always approved and has correct role
             if (isAdmin && (!existingProfile.isApproved || existingProfile.role !== 'admin')) {
               const updatedProfile = { 
                 ...existingProfile, 
                 role: 'admin' as const, 
-                isApproved: true 
+                isApproved: true,
+                updatedAt: Date.now()
               };
-              await setDoc(doc(db, 'users', user.uid), updatedProfile);
+              await fetch(`/api/users/${user.uid}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedProfile)
+              });
               setProfile(updatedProfile);
             } else {
               setProfile(existingProfile);
             }
           } else {
-            // Create default profile for new user
+            // Create default profile for new user in MySQL
             const newProfile: UserProfile = {
               uid: user.uid,
               email: user.email || '',
@@ -70,12 +78,16 @@ export default function App() {
               photoURL: user.photoURL || undefined,
               isApproved: isAdmin // Admin is auto-approved
             };
-            await setDoc(doc(db, 'users', user.uid), newProfile);
+            await fetch('/api/users', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newProfile)
+            });
             setProfile(newProfile);
           }
         } catch (err) {
           console.error("Error fetching profile:", err);
-          setError("Không thể tải thông tin người dùng.");
+          setError("Không thể tải thông tin người dùng từ máy chủ. Vui lòng kiểm tra cấu hình cơ sở dữ liệu.");
         }
       } else {
         setUser(null);
@@ -90,56 +102,62 @@ export default function App() {
   useEffect(() => {
     if (!profile) return;
 
-    const qCustomers = profile.role === 'admin'
-      ? query(collection(db, 'customers'), orderBy('createdAt', 'desc'))
-      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid), orderBy('createdAt', 'desc'));
-    
-    const unsubscribeCustomers = onSnapshot(qCustomers, (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
-    });
+    const fetchData = async () => {
+      try {
+        const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
+        const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
 
-    const qAppointments = profile.role === 'admin'
-      ? query(collection(db, 'appointments'), orderBy('time', 'asc'))
-      : query(collection(db, 'appointments'), where('staffId', '==', profile.uid), orderBy('time', 'asc'));
+        const [
+          customersRes,
+          appointmentsRes,
+          receiptsRes,
+          paymentsRes,
+          sessionsRes,
+          attendanceRes,
+          staffRes
+        ] = await Promise.all([
+          fetch(`/api/customers${ownerIdParam}`),
+          fetch(`/api/appointments${staffIdParam}`),
+          fetch(`/api/receipts`),
+          fetch(`/api/payment_vouchers`),
+          fetch(`/api/teaching_sessions`),
+          fetch(`/api/attendance`),
+          fetch(`/api/users`)
+        ]);
 
-    const unsubscribeAppointments = onSnapshot(qAppointments, (snapshot) => {
-      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
-    });
+        const [
+          customersData,
+          appointmentsData,
+          receiptsData,
+          paymentsData,
+          sessionsData,
+          attendanceData,
+          staffData
+        ] = await Promise.all([
+          customersRes.json(),
+          appointmentsRes.json(),
+          receiptsRes.json(),
+          paymentsRes.json(),
+          sessionsRes.json(),
+          attendanceRes.json(),
+          staffRes.json()
+        ]);
 
-    const qReceipts = query(collection(db, 'receipts'), orderBy('createdAt', 'desc'));
-    const unsubscribeReceipts = onSnapshot(qReceipts, (snapshot) => {
-      setReceipts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Receipt)));
-    });
-
-    const qPayments = query(collection(db, 'payment_vouchers'), orderBy('createdAt', 'desc'));
-    const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
-      setPaymentVouchers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentVoucher)));
-    });
-
-    const qSessions = query(collection(db, 'teaching_sessions'), orderBy('date', 'desc'));
-    const unsubscribeSessions = onSnapshot(qSessions, (snapshot) => {
-      setTeachingSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingSession)));
-    });
-
-    const qAttendance = query(collection(db, 'attendance'));
-    const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
-      setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
-    });
-
-    const qStaff = query(collection(db, 'users'));
-    const unsubscribeStaff = onSnapshot(qStaff, (snapshot) => {
-      setStaff(snapshot.docs.map(doc => doc.data() as UserProfile));
-    });
-
-    return () => {
-      unsubscribeCustomers();
-      unsubscribeAppointments();
-      unsubscribeReceipts();
-      unsubscribePayments();
-      unsubscribeSessions();
-      unsubscribeAttendance();
-      unsubscribeStaff();
+        setCustomers(Array.isArray(customersData) ? customersData : []);
+        setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
+        setReceipts(Array.isArray(receiptsData) ? receiptsData : []);
+        setPaymentVouchers(Array.isArray(paymentsData) ? paymentsData : []);
+        setTeachingSessions(Array.isArray(sessionsData) ? sessionsData : []);
+        setAttendance(Array.isArray(attendanceData) ? attendanceData : []);
+        setStaff(Array.isArray(staffData) ? staffData : []);
+      } catch (err) {
+        console.error("Error fetching app data:", err);
+      }
     };
+
+    fetchData();
+    const interval = setInterval(fetchData, 60000); // Poll every minute
+    return () => clearInterval(interval);
   }, [profile]);
 
   if (loading) {

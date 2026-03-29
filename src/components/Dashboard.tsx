@@ -7,61 +7,7 @@ import {
   ArrowUpRight,
   ArrowDownRight
 } from 'lucide-react';
-import { collection, query, onSnapshot, where } from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { Customer, Appointment, UserProfile } from '../types';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
 import { 
   BarChart, 
   Bar, 
@@ -87,31 +33,31 @@ export default function Dashboard({ profile }: DashboardProps) {
   useEffect(() => {
     if (!profile) return;
 
-    const customersQuery = profile.role === 'admin' 
-      ? query(collection(db, 'customers'))
-      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid));
+    const fetchData = async () => {
+      try {
+        const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
+        const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
 
-    const appointmentsQuery = profile.role === 'admin'
-      ? query(collection(db, 'appointments'))
-      : query(collection(db, 'appointments'), where('staffId', '==', profile.uid));
+        const [appointmentsRes, customersRes] = await Promise.all([
+          fetch(`/api/appointments${staffIdParam}`),
+          fetch(`/api/customers${ownerIdParam}`)
+        ]);
 
-    const unsubCustomers = onSnapshot(customersQuery, (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'customers');
-    });
+        const [appointmentsData, customersData] = await Promise.all([
+          appointmentsRes.json(),
+          customersRes.json()
+        ]);
 
-    const unsubAppointments = onSnapshot(appointmentsQuery, (snapshot) => {
-      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'appointments');
-    });
-
-    return () => {
-      unsubCustomers();
-      unsubAppointments();
+        setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
+        setCustomers(Array.isArray(customersData) ? customersData : []);
+        setLoading(false);
+      } catch (error) {
+        console.error("Error fetching dashboard data:", error);
+        setLoading(false);
+      }
     };
+
+    fetchData();
   }, [profile]);
 
   const stats = [

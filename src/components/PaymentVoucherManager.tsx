@@ -1,17 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc,
-  deleteDoc,
-  orderBy,
-  where,
-  doc,
-  getDocs
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
 import { PaymentVoucher, UserProfile, PaymentCategory, PaymentMethod, CenterInfo, Teacher, TeachingAssistant } from '../types';
 import { 
   Plus, 
@@ -79,44 +66,39 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
   const isAdmin = profile?.role === 'admin';
   const isStaff = profile?.role === 'staff';
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!profile) return;
+    try {
+      const [vouchersRes, centerRes, staffRes, teachersRes, tasRes] = await Promise.all([
+        fetch('/api/payment_vouchers'),
+        fetch('/api/settings/default'),
+        fetch('/api/users'),
+        fetch('/api/teachers'),
+        fetch('/api/teaching_assistants')
+      ]);
 
-    const qVouchers = query(collection(db, 'payment_vouchers'), orderBy('createdAt', 'desc'));
-    const unsubscribeVouchers = onSnapshot(qVouchers, (snapshot) => {
-      setVouchers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PaymentVoucher)));
+      const [vouchersData, centerData, staffData, teachersData, tasData] = await Promise.all([
+        vouchersRes.json(),
+        centerRes.json(),
+        staffRes.json(),
+        teachersRes.json(),
+        tasRes.json()
+      ]);
+
+      setVouchers(Array.isArray(vouchersData) ? vouchersData : []);
+      if (centerData && !centerData.error) setCenterInfo(centerData);
+      setStaffList(Array.isArray(staffData) ? staffData : []);
+      setTeachers(Array.isArray(teachersData) ? teachersData : []);
+      setTas(Array.isArray(tasData) ? tasData : []);
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'payment_vouchers');
-    });
+    } catch (error) {
+      console.error("Error fetching payment voucher data:", error);
+      setLoading(false);
+    }
+  };
 
-    const unsubscribeCenterInfo = onSnapshot(doc(db, 'center_info', 'default'), (docSnap) => {
-      if (docSnap.exists()) {
-        setCenterInfo({ id: docSnap.id, ...docSnap.data() } as CenterInfo);
-      }
-    });
-
-    // Fetch recipients for salary
-    const fetchRecipients = async () => {
-      try {
-        const staffSnap = await getDocs(collection(db, 'users'));
-        setStaffList(staffSnap.docs.map(doc => doc.data() as UserProfile));
-        
-        const teacherSnap = await getDocs(collection(db, 'teachers'));
-        setTeachers(teacherSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Teacher)));
-        
-        const taSnap = await getDocs(collection(db, 'teaching_assistants'));
-        setTas(taSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingAssistant)));
-      } catch (error) {
-        console.error("Error fetching recipients:", error);
-      }
-    };
-    fetchRecipients();
-
-    return () => {
-      unsubscribeVouchers();
-      unsubscribeCenterInfo();
-    };
+  useEffect(() => {
+    fetchData();
   }, [profile]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -140,18 +122,27 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
 
     try {
       if (selectedVoucher) {
-        await updateDoc(doc(db, 'payment_vouchers', selectedVoucher.id), {
-          ...data,
-          voucherNumber: selectedVoucher.voucherNumber
+        await fetch(`/api/payment_vouchers/${selectedVoucher.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...data,
+            voucherNumber: selectedVoucher.voucherNumber
+          })
         });
       } else {
         const voucherNumber = `PC-${format(new Date(data.date), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
-        await addDoc(collection(db, 'payment_vouchers'), { 
-          ...data, 
-          voucherNumber,
-          createdAt: Date.now() 
+        await fetch('/api/payment_vouchers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            ...data, 
+            voucherNumber,
+            createdAt: Date.now() 
+          })
         });
       }
+      fetchData();
       setIsModalOpen(false);
       setSelectedVoucher(null);
       setFormData({
@@ -165,50 +156,32 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
         attachmentUrl: ''
       });
     } catch (error) {
-      handleFirestoreError(error, selectedVoucher ? OperationType.UPDATE : OperationType.CREATE, 'payment_vouchers');
+      console.error('Error saving payment voucher:', error);
     }
-  };
-
-  const filteredVouchers = vouchers.filter(v => {
-    const matchesSearch = v.recipientName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         v.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         v.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || v.category === categoryFilter;
-    
-    const voucherDate = new Date(v.date || v.createdAt);
-    const startDate = startOfDay(parseISO(dateRange.start));
-    const endDate = endOfDay(parseISO(dateRange.end));
-    const matchesDate = isWithinInterval(voucherDate, { start: startDate, end: endDate });
-
-    return matchesSearch && matchesCategory && matchesDate;
-  });
-
-  const totalSpent = filteredVouchers.reduce((sum, v) => sum + v.amount, 0);
-
-  const openEditModal = (voucher: PaymentVoucher) => {
-    if (!isAdmin) return;
-    setSelectedVoucher(voucher);
-    setFormData({
-      category: voucher.category,
-      recipientName: voucher.recipientName,
-      recipientId: voucher.recipientId || '',
-      amount: voucher.amount,
-      description: voucher.description,
-      paymentMethod: voucher.paymentMethod,
-      date: format(voucher.date || voucher.createdAt, 'yyyy-MM-dd'),
-      attachmentUrl: voucher.attachmentUrl || ''
-    });
-    setIsModalOpen(true);
   };
 
   const handleDelete = async () => {
     if (!voucherToDelete) return;
     try {
-      await deleteDoc(doc(db, 'payment_vouchers', voucherToDelete.id));
+      await fetch(`/api/payment_vouchers/${voucherToDelete.id}`, { method: 'DELETE' });
+      fetchData();
       setIsDeleteModalOpen(false);
       setVoucherToDelete(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'payment_vouchers');
+      console.error('Error deleting payment voucher:', error);
+    }
+  };
+
+  const handleApprove = async (id: string) => {
+    try {
+      await fetch(`/api/payment_vouchers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved', updatedAt: Date.now() })
+      });
+      fetchData();
+    } catch (error) {
+      console.error('Error approving payment voucher:', error);
     }
   };
 
@@ -234,6 +207,40 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
     'tiền nhà', 'tiền điện', 'tiền nước', 
     'văn phòng phẩm', 'marketing', 'khác'
   ];
+
+  const filteredVouchers = vouchers.filter(voucher => {
+    const matchesSearch = 
+      voucher.recipientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      voucher.voucherNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      voucher.description.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesCategory = categoryFilter === 'all' || voucher.category === categoryFilter;
+    
+    const voucherDate = voucher.date || voucher.createdAt;
+    const matchesDate = isWithinInterval(voucherDate, {
+      start: startOfDay(parseISO(dateRange.start)),
+      end: endOfDay(parseISO(dateRange.end))
+    });
+
+    return matchesSearch && matchesCategory && matchesDate;
+  }).sort((a, b) => (b.date || b.createdAt) - (a.date || a.createdAt));
+
+  const totalSpent = filteredVouchers.reduce((sum, v) => sum + v.amount, 0);
+
+  const openEditModal = (voucher: PaymentVoucher) => {
+    setSelectedVoucher(voucher);
+    setFormData({
+      category: voucher.category,
+      recipientName: voucher.recipientName,
+      recipientId: voucher.recipientId || '',
+      amount: voucher.amount,
+      description: voucher.description,
+      paymentMethod: voucher.paymentMethod,
+      date: format(voucher.date || voucher.createdAt, 'yyyy-MM-dd'),
+      attachmentUrl: voucher.attachmentUrl || ''
+    });
+    setIsModalOpen(true);
+  };
 
   if (loading) {
     return (
@@ -412,13 +419,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
                           </button>
                           {voucher.status === 'pending' && (
                             <button 
-                              onClick={async () => {
-                                try {
-                                  await updateDoc(doc(db, 'payment_vouchers', voucher.id), { status: 'approved', updatedAt: Date.now() });
-                                } catch (error) {
-                                  handleFirestoreError(error, OperationType.UPDATE, 'payment_vouchers');
-                                }
-                              }}
+                              onClick={() => handleApprove(voucher.id)}
                               className="p-2 text-gray-400 hover:text-green-600 transition-colors" 
                               title="Duyệt phiếu chi"
                             >

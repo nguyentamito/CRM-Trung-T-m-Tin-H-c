@@ -1,11 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  doc, 
-  getDoc, 
-  setDoc,
-  onSnapshot
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
 import { CenterInfo, UserProfile } from '../types';
 import { 
   Building2, 
@@ -37,14 +30,20 @@ export default function Settings({ profile }: SettingsProps) {
   const isAdmin = profile?.role === 'admin';
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'center_info', 'default'), (docSnap) => {
-      if (docSnap.exists()) {
-        setCenterInfo({ id: docSnap.id, ...docSnap.data() } as CenterInfo);
+    const fetchCenterInfo = async () => {
+      try {
+        const response = await fetch('/api/settings/center_info');
+        if (response.ok) {
+          const data = await response.json();
+          if (data && !data.error) setCenterInfo(data);
+        }
+      } catch (error) {
+        console.error("Error fetching center info:", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    });
-
-    return () => unsub();
+    };
+    fetchCenterInfo();
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -55,13 +54,21 @@ export default function Settings({ profile }: SettingsProps) {
     setMessage(null);
 
     try {
-      await setDoc(doc(db, 'center_info', 'default'), {
-        ...centerInfo,
-        updatedAt: Date.now()
+      const response = await fetch('/api/settings/center_info', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...centerInfo,
+          updatedAt: Date.now()
+        })
       });
-      setMessage({ type: 'success', text: 'Cập nhật thông tin trung tâm thành công!' });
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Cập nhật thông tin trung tâm thành công!' });
+      } else {
+        throw new Error('Failed to update');
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'center_info/default');
+      console.error("Error updating center info:", error);
       setMessage({ type: 'error', text: 'Có lỗi xảy ra khi cập nhật thông tin.' });
     } finally {
       setSaving(false);
@@ -76,13 +83,21 @@ export default function Settings({ profile }: SettingsProps) {
     if (!profile) return;
     setUpdatingProfile(true);
     try {
-      await setDoc(doc(db, 'users', profile.uid), {
-        ...profile,
-        displayName: userDisplayName
+      const response = await fetch(`/api/users/${profile.uid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...profile,
+          displayName: userDisplayName
+        })
       });
-      setMessage({ type: 'success', text: 'Cập nhật thông tin cá nhân thành công!' });
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Cập nhật thông tin cá nhân thành công!' });
+      } else {
+        throw new Error('Failed to update profile');
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${profile.uid}`);
+      console.error("Error updating profile:", error);
       setMessage({ type: 'error', text: 'Có lỗi xảy ra khi cập nhật thông tin cá nhân.' });
     } finally {
       setUpdatingProfile(false);

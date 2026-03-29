@@ -57,11 +57,18 @@ export default function RoomList({ profile }: RoomListProps) {
   });
 
   useEffect(() => {
-    const q = query(collection(db, 'rooms'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setRooms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
-    });
-    return () => unsubscribe();
+    const fetchRooms = async () => {
+      try {
+        const response = await fetch('/api/rooms');
+        if (response.ok) {
+          const data = await response.json();
+          setRooms(Array.isArray(data) ? data : []);
+        }
+      } catch (error) {
+        console.error('Error fetching rooms:', error);
+      }
+    };
+    fetchRooms();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,25 +82,41 @@ export default function RoomList({ profile }: RoomListProps) {
 
     try {
       if (editingRoom) {
-        await updateDoc(doc(db, 'rooms', editingRoom.id), data);
-      } else {
-        await addDoc(collection(db, 'rooms'), {
-          ...data,
-          createdAt: Date.now(),
+        const response = await fetch(`/api/rooms/${editingRoom.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
         });
+        if (response.ok) {
+          const updatedRoom = await response.json();
+          setRooms(rooms.map(r => r.id === editingRoom.id ? { ...r, ...updatedRoom } : r));
+        }
+      } else {
+        const response = await fetch('/api/rooms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...data, createdAt: Date.now() }),
+        });
+        if (response.ok) {
+          const newRoom = await response.json();
+          setRooms([...rooms, newRoom].sort((a, b) => a.name.localeCompare(b.name)));
+        }
       }
       closeModal();
     } catch (error) {
-      handleFirestoreError(error, editingRoom ? OperationType.UPDATE : OperationType.CREATE, 'rooms');
+      console.error('Error saving room:', error);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!isAdmin || !window.confirm('Bạn có chắc muốn xóa phòng học này?')) return;
     try {
-      await deleteDoc(doc(db, 'rooms', id));
+      const response = await fetch(`/api/rooms/${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        setRooms(rooms.filter(r => r.id !== id));
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `rooms/${id}`);
+      console.error('Error deleting room:', error);
     }
   };
 

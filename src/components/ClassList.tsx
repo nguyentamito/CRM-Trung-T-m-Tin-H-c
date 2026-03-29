@@ -1,16 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  orderBy,
-  where
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Class, Teacher, TeachingAssistant, Customer, Subject, UserProfile, TeachingSession, Attendance, SessionStatus, Room } from '../types';
 import { 
   ChevronLeft,
@@ -93,61 +81,64 @@ export default function ClassList({ profile }: ClassListProps) {
     status: 'chưa diễn ra' as SessionStatus,
   });
 
+  const fetchData = async () => {
+    try {
+      const [
+        classesRes,
+        teachersRes,
+        tasRes,
+        customersRes,
+        subjectsRes,
+        sessionsRes,
+        attendanceRes,
+        roomsRes
+      ] = await Promise.all([
+        fetch('/api/classes'),
+        fetch('/api/teachers'),
+        fetch('/api/teaching_assistants'),
+        fetch('/api/customers'),
+        fetch('/api/subjects'),
+        fetch('/api/teaching_sessions'),
+        fetch('/api/attendance'),
+        fetch('/api/rooms')
+      ]);
+
+      const [
+        classesData,
+        teachersData,
+        tasData,
+        customersData,
+        subjectsData,
+        sessionsData,
+        attendanceData,
+        roomsData
+      ] = await Promise.all([
+        classesRes.json(),
+        teachersRes.json(),
+        tasRes.json(),
+        customersRes.json(),
+        subjectsRes.json(),
+        sessionsRes.json(),
+        attendanceRes.json(),
+        roomsRes.json()
+      ]);
+
+      setClasses(Array.isArray(classesData) ? classesData : []);
+      setTeachers(Array.isArray(teachersData) ? teachersData : []);
+      setTAs(Array.isArray(tasData) ? tasData : []);
+      setCustomers(Array.isArray(customersData) ? customersData : []);
+      setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
+      setTeachingSessions(Array.isArray(sessionsData) ? sessionsData : []);
+      setAttendanceRecords(Array.isArray(attendanceData) ? attendanceData : []);
+      setRooms(Array.isArray(roomsData) ? roomsData : []);
+    } catch (error) {
+      console.error("Error fetching class list data:", error);
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, 'classes'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setClasses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Class)));
-    });
-
-    const qTeachers = query(collection(db, 'teachers'), orderBy('name', 'asc'));
-    const unsubscribeTeachers = onSnapshot(qTeachers, (snapshot) => {
-      setTeachers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Teacher)));
-    });
-
-    const qTAs = query(collection(db, 'teaching_assistants'), orderBy('name', 'asc'));
-    const unsubscribeTAs = onSnapshot(qTAs, (snapshot) => {
-      setTAs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingAssistant)));
-    });
-
-    const qCustomers = profile?.role === 'admin'
-      ? query(collection(db, 'customers'), orderBy('name', 'asc'))
-      : query(collection(db, 'customers'), where('ownerId', '==', profile?.uid), orderBy('name', 'asc'));
-
-    const unsubscribeCustomers = onSnapshot(qCustomers, (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
-    });
-
-    const qSubjects = query(collection(db, 'subjects'), orderBy('name', 'asc'));
-    const unsubscribeSubjects = onSnapshot(qSubjects, (snapshot) => {
-      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject)));
-    });
-
-    const qSessions = query(collection(db, 'teaching_sessions'), orderBy('date', 'asc'));
-    const unsubscribeSessions = onSnapshot(qSessions, (snapshot) => {
-      setTeachingSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingSession)));
-    });
-
-    const qAttendance = query(collection(db, 'attendance'));
-    const unsubscribeAttendance = onSnapshot(qAttendance, (snapshot) => {
-      setAttendanceRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
-    });
-
-    const qRooms = query(collection(db, 'rooms'), orderBy('name', 'asc'));
-    const unsubscribeRooms = onSnapshot(qRooms, (snapshot) => {
-      setRooms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
-    });
-
-    return () => {
-      unsubscribe();
-      unsubscribeTeachers();
-      unsubscribeTAs();
-      unsubscribeCustomers();
-      unsubscribeSubjects();
-      unsubscribeSessions();
-      unsubscribeAttendance();
-      unsubscribeRooms();
-    };
-  }, []);
+    fetchData();
+  }, [profile]);
 
   const checkConflict = (roomId: string, date: number, startTime: string, endTime: string, excludeSessionId?: string) => {
     if (!roomId) return null;
@@ -182,31 +173,43 @@ export default function ClassList({ profile }: ClassListProps) {
       roomName: selectedRoom?.name || '',
       roomLink: selectedRoom?.location || '',
       startDate: new Date(formData.startDate).getTime(),
-      sessions: formData.sessions || [],
+      sessions: JSON.stringify(formData.sessions || []),
+      studentIds: JSON.stringify(formData.studentIds || []),
+      studentNames: JSON.stringify(formData.studentNames || []),
       updatedAt: Date.now(),
     };
 
     try {
       if (editingClass) {
-        await updateDoc(doc(db, 'classes', editingClass.id), data);
+        await fetch(`/api/classes/${editingClass.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        await addDoc(collection(db, 'classes'), {
-          ...data,
-          createdAt: Date.now(),
+        await fetch('/api/classes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...data,
+            createdAt: Date.now(),
+          })
         });
       }
+      fetchData();
       closeModal();
     } catch (error) {
-      handleFirestoreError(error, editingClass ? OperationType.UPDATE : OperationType.CREATE, 'classes');
+      console.error("Error saving class:", error);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!isAdmin || !window.confirm('Bạn có chắc muốn xóa lớp học này?')) return;
     try {
-      await deleteDoc(doc(db, 'classes', id));
+      await fetch(`/api/classes/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `classes/${id}`);
+      console.error("Error deleting class:", error);
     }
   };
 
@@ -239,10 +242,19 @@ export default function ClassList({ profile }: ClassListProps) {
 
     try {
       if (editingSession) {
-        await updateDoc(doc(db, 'teaching_sessions', editingSession.id), data);
+        await fetch(`/api/teaching_sessions/${editingSession.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        await addDoc(collection(db, 'teaching_sessions'), data);
+        await fetch('/api/teaching_sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       }
+      fetchData();
       setIsSessionModalOpen(false);
       setEditingSession(null);
       setSessionFormData({
@@ -256,16 +268,17 @@ export default function ClassList({ profile }: ClassListProps) {
         status: 'chưa diễn ra',
       });
     } catch (error) {
-      handleFirestoreError(error, editingSession ? OperationType.UPDATE : OperationType.CREATE, 'teaching_sessions');
+      console.error("Error saving session:", error);
     }
   };
 
   const handleDeleteSession = async (id: string) => {
     if (!isAdmin) return;
     try {
-      await deleteDoc(doc(db, 'teaching_sessions', id));
+      await fetch(`/api/teaching_sessions/${id}`, { method: 'DELETE' });
+      fetchData();
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `teaching_sessions/${id}`);
+      console.error("Error deleting session:", error);
     }
   };
 
@@ -305,18 +318,27 @@ export default function ClassList({ profile }: ClassListProps) {
 
     try {
       if (existingRecord) {
-        await updateDoc(doc(db, 'attendance', existingRecord.id), data);
+        await fetch(`/api/attendance/${existingRecord.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        await addDoc(collection(db, 'attendance'), {
-          ...data,
-          sessionId: selectedSessionForAttendance.id,
-          classId: selectedSessionForAttendance.classId,
-          studentId,
-          studentName,
+        await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...data,
+            sessionId: selectedSessionForAttendance.id,
+            classId: selectedSessionForAttendance.classId,
+            studentId,
+            studentName,
+          })
         });
       }
+      fetchData();
     } catch (error) {
-      handleFirestoreError(error, existingRecord ? OperationType.UPDATE : OperationType.CREATE, 'attendance');
+      console.error("Error updating attendance:", error);
     }
   };
 
@@ -409,14 +431,19 @@ export default function ClassList({ profile }: ClassListProps) {
     if (!isAdmin || !selectedClassForStudents) return;
 
     try {
-      await updateDoc(doc(db, 'classes', selectedClassForStudents.id), {
-        studentIds: formData.studentIds,
-        studentNames: formData.studentNames,
-        updatedAt: Date.now(),
+      await fetch(`/api/classes/${selectedClassForStudents.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentIds: JSON.stringify(formData.studentIds),
+          studentNames: JSON.stringify(formData.studentNames),
+          updatedAt: Date.now(),
+        })
       });
+      fetchData();
       closeStudentManagement();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `classes/${selectedClassForStudents.id}`);
+      console.error("Error updating students:", error);
     }
   };
 

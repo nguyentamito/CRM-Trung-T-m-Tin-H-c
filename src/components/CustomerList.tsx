@@ -16,7 +16,7 @@ import {
 import { collection, query, onSnapshot, where, addDoc, updateDoc, deleteDoc, doc, orderBy, limit, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Customer, UserProfile, CustomerStatus, CustomerSource, Interaction, InteractionStatus, Subject, ReceiptType, PaymentMethod, Receipt } from '../types';
-import { cn, formatDate, formatOnlyDate, formatNumber } from '../lib/utils';
+import { cn, formatDate, formatOnlyDate, formatNumber, safeGetISODate, safeGetISODateTime } from '../lib/utils';
 import InteractionTimeline from './InteractionTimeline';
 import Papa from 'papaparse';
 
@@ -122,58 +122,53 @@ export default function CustomerList({ profile }: CustomerListProps) {
   useEffect(() => {
     if (!profile) return;
 
-    const q = profile.role === 'admin'
-      ? query(collection(db, 'customers'), orderBy('updatedAt', 'desc'))
-      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid), orderBy('updatedAt', 'desc'));
+    const fetchData = async () => {
+      try {
+        const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
+        
+        const [customersRes, interactionsRes, subjectsRes, receiptsRes] = await Promise.all([
+          fetch(`/api/customers${ownerIdParam}`),
+          fetch(`/api/interactions`),
+          fetch(`/api/subjects`),
+          fetch(`/api/receipts`)
+        ]);
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      const customerData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
-      setCustomers(customerData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'customers');
-    });
+        const [customersData, interactionsData, subjectsData, receiptsData] = await Promise.all([
+          customersRes.json(),
+          interactionsRes.json(),
+          subjectsRes.json(),
+          receiptsRes.json()
+        ]);
 
-    // Fetch latest interaction for each customer
-    const unsubInteractions = onSnapshot(query(collection(db, 'interactions'), orderBy('createdAt', 'desc')), (snapshot) => {
-      const latest: Record<string, Interaction> = {};
-      snapshot.docs.forEach(doc => {
-        const data = { id: doc.id, ...doc.data() } as Interaction;
-        if (!latest[data.customerId]) {
-          latest[data.customerId] = data;
+        setCustomers(Array.isArray(customersData) ? customersData : []);
+        setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
+        setReceipts(Array.isArray(receiptsData) ? receiptsData : []);
+
+        const latest: Record<string, Interaction> = {};
+        if (Array.isArray(interactionsData)) {
+          interactionsData.forEach((data: Interaction) => {
+            if (!latest[data.customerId]) {
+              latest[data.customerId] = data;
+            }
+          });
         }
-      });
-      setInteractions(latest);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'interactions');
-    });
-
-    const unsubSubjects = onSnapshot(query(collection(db, 'subjects'), orderBy('name', 'asc')), (snapshot) => {
-      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'subjects');
-    });
-
-    const unsubReceipts = onSnapshot(collection(db, 'receipts'), (snapshot) => {
-      setReceipts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Receipt)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'receipts');
-    });
-
-    return () => {
-      unsub();
-      unsubInteractions();
-      unsubSubjects();
-      unsubReceipts();
+        setInteractions(latest);
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
     };
+
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Poll every 30s as a simple fallback for real-time
+    return () => clearInterval(interval);
   }, [profile]);
 
   const handleCreateReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !selectedCustomer) return;
 
-    const totalAmount = parseInt(selectedCustomer.closedAmount.replace(/\D/g, '')) || 0;
+    const totalAmount = parseInt(selectedCustomer.closedAmount.toString().replace(/\D/g, '')) || 0;
     
-    // Calculate total already paid by this customer
     const totalPaid = receipts
       .filter(r => r.customerId === selectedCustomer.id)
       .reduce((sum, r) => sum + r.amount, 0);
@@ -206,18 +201,26 @@ export default function CustomerList({ profile }: CustomerListProps) {
     };
 
     try {
-      await addDoc(collection(db, 'receipts'), data);
-      setIsReceiptModalOpen(false);
-      setReceiptData({
-        amount: 0,
-        type: 'đóng 100%',
-        paymentMethod: 'chuyển khoản',
-        note: '',
-        date: new Date().toISOString().split('T')[0],
-        attachmentUrl: ''
+      const res = await fetch('/api/receipts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
       });
+      if (res.ok) {
+        setIsReceiptModalOpen(false);
+        setReceiptData({
+          amount: 0,
+          type: 'đóng 100%',
+          paymentMethod: 'chuyển khoản',
+          note: '',
+          date: new Date().toISOString().split('T')[0],
+          attachmentUrl: ''
+        });
+        // Refresh data
+        window.location.reload();
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'receipts');
+      console.error("Error creating receipt:", error);
     }
   };
 
@@ -264,37 +267,53 @@ export default function CustomerList({ profile }: CustomerListProps) {
 
       if (selectedCustomer) {
         customerId = selectedCustomer.id;
-        await updateDoc(doc(db, 'customers', customerId), data);
-      } else {
-        const docRef = await addDoc(collection(db, 'customers'), {
-          ...data,
-          createdAt: Date.now()
+        await fetch(`/api/customers/${customerId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
         });
-        customerId = docRef.id;
+      } else {
+        const res = await fetch('/api/customers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...data, createdAt: Date.now() })
+        });
+        const newCustomer = await res.json();
+        customerId = newCustomer.id;
 
         if (initialInteraction.trim()) {
-          await addDoc(collection(db, 'interactions'), {
-            customerId: customerId,
-            content: initialInteraction,
-            notes: 'Tạo cùng lúc với khách hàng',
-            status: 'đã liên hệ',
-            staffId: profile.uid,
-            createdAt: Date.now()
+          await fetch('/api/interactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              customerId: customerId,
+              content: initialInteraction,
+              notes: 'Tạo cùng lúc với khách hàng',
+              status: 'đã liên hệ',
+              staffId: profile.uid,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            })
           });
         }
       }
 
       // Create appointment if provided
       if (appointmentTime > 0 && appointmentContent.trim()) {
-        await addDoc(collection(db, 'appointments'), {
-          customerId: customerId,
-          customerName: customerName,
-          customerPhone: data.phone,
-          time: appointmentTime,
-          content: appointmentContent,
-          staffId: profile.uid,
-          status: 'chưa diễn ra',
-          createdAt: Date.now()
+        await fetch('/api/appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: customerId,
+            customerName: customerName,
+            customerPhone: data.phone,
+            time: appointmentTime,
+            content: appointmentContent,
+            staffId: profile.uid,
+            status: 'chưa diễn ra',
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          })
         });
       }
 
@@ -314,8 +333,9 @@ export default function CustomerList({ profile }: CustomerListProps) {
         appointmentTime: 0,
         appointmentContent: ''
       });
+      window.location.reload();
     } catch (err) {
-      handleFirestoreError(err, selectedCustomer ? OperationType.UPDATE : OperationType.CREATE, 'customers');
+      console.error("Error submitting customer:", err);
     }
   };
 
@@ -327,11 +347,12 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const confirmDelete = async () => {
     if (!customerToDelete) return;
     try {
-      await deleteDoc(doc(db, 'customers', customerToDelete));
+      await fetch(`/api/customers/${customerToDelete}`, { method: 'DELETE' });
       setIsDeleteModalOpen(false);
       setCustomerToDelete(null);
+      window.location.reload();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `customers/${customerToDelete}`);
+      console.error("Error deleting customer:", err);
     }
   };
 
@@ -340,25 +361,35 @@ export default function CustomerList({ profile }: CustomerListProps) {
     if (!profile || !selectedCustomer || !quickNoteData.content.trim()) return;
 
     try {
-      await addDoc(collection(db, 'interactions'), {
-        customerId: selectedCustomer.id,
-        content: quickNoteData.content,
-        notes: quickNoteData.notes,
-        status: quickNoteData.status,
-        staffId: profile.uid,
-        createdAt: Date.now()
+      await fetch('/api/interactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: selectedCustomer.id,
+          content: quickNoteData.content,
+          notes: quickNoteData.notes,
+          status: quickNoteData.status,
+          staffId: profile.uid,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        })
       });
 
       // Update customer's updatedAt
-      await updateDoc(doc(db, 'customers', selectedCustomer.id), {
-        updatedAt: Date.now()
+      await fetch(`/api/customers/${selectedCustomer.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          updatedAt: Date.now()
+        })
       });
 
       setIsQuickNoteOpen(false);
       setQuickNoteData({ content: '', status: 'đã liên hệ', notes: '' });
       setSelectedCustomer(null);
+      window.location.reload();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'interactions');
+      console.error("Error submitting quick note:", err);
     }
   };
 
@@ -389,22 +420,47 @@ export default function CustomerList({ profile }: CustomerListProps) {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (header) => header.trim().toLowerCase(),
       complete: async (results) => {
-        const batch = writeBatch(db);
         let count = 0;
+        let errors = 0;
+        const errorMessages: string[] = [];
 
-        for (const row of results.data as any[]) {
-          if (!row.name || !row.phone) continue;
+        // Map common variations of headers
+        const normalizeRow = (row: any) => {
+          return {
+            name: row.name || row['họ tên'] || row['tên'] || row['fullname'] || '',
+            phone: row.phone || row['sđt'] || row['số điện thoại'] || row['telephone'] || '',
+            consultationDate: row.consultationdate || row['ngày tư vấn'] || row['date'] || '',
+            fbLink: row.fblink || row['link facebook'] || row['facebook'] || '',
+            subject: row.subject || row['môn'] || row['môn học'] || '',
+            status: row.status || row['trạng thái'] || 'Phân vân',
+            notes: row.notes || row['ghi chú'] || '',
+            closedAmount: row.closedamount || row['số tiền chốt'] || row['tiền chốt'] || '0',
+            source: row.source || row['nguồn'] || 'Facebook'
+          };
+        };
+
+        for (const rawRow of results.data as any[]) {
+          const row = normalizeRow(rawRow);
+          if (!row.name || !row.phone) {
+            errors++;
+            errorMessages.push(`Bỏ qua dòng thiếu tên hoặc SĐT: ${JSON.stringify(rawRow)}`);
+            continue;
+          }
+
+          const consultationDate = row.consultationDate ? new Date(row.consultationDate).getTime() : Date.now();
+          const finalConsultationDate = isNaN(consultationDate) ? Date.now() : consultationDate;
 
           const customerData = {
             name: row.name,
             phone: row.phone,
-            consultationDate: row.consultationDate ? new Date(row.consultationDate).getTime() : Date.now(),
+            consultationDate: finalConsultationDate,
             fbLink: row.fbLink || '',
             subject: row.subject || '',
             status: (row.status || 'Phân vân') as CustomerStatus,
             notes: row.notes || '',
-            closedAmount: (row.closedAmount || '0').replace(/[^0-9]/g, ""),
+            closedAmount: String(row.closedAmount).replace(/[^0-9]/g, ""),
             source: (row.source || 'Facebook') as CustomerSource,
             ownerId: profile.uid,
             ownerName: profile.displayName || profile.email || 'Unknown',
@@ -412,28 +468,40 @@ export default function CustomerList({ profile }: CustomerListProps) {
             updatedAt: Date.now()
           };
 
-          const newDocRef = doc(collection(db, 'customers'));
-          batch.set(newDocRef, customerData);
-          count++;
-
-          // Firestore batch limit is 500
-          if (count === 500) break;
-        }
-
-        try {
-          if (count > 0) {
-            await batch.commit();
-            alert(`Đã nhập thành công ${count} khách hàng!`);
-          } else {
-            alert('Không tìm thấy dữ liệu hợp lệ để nhập.');
+          try {
+            const res = await fetch('/api/customers', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(customerData)
+            });
+            
+            if (res.ok) {
+              count++;
+            } else {
+              errors++;
+              const errorText = await res.text();
+              console.error("Failed to import customer:", row.name, errorText);
+              errorMessages.push(`Lỗi khi nhập ${row.name}: ${errorText}`);
+            }
+          } catch (err) {
+            errors++;
+            console.error("Error importing customer:", row.name, err);
+            errorMessages.push(`Lỗi hệ thống khi nhập ${row.name}`);
           }
-        } catch (error) {
-          console.error("Error importing customers:", error);
-          alert('Có lỗi xảy ra khi nhập dữ liệu.');
-        } finally {
-          setIsImporting(false);
-          if (e.target) e.target.value = '';
         }
+
+        setIsImporting(false);
+        if (count > 0) {
+          alert(`Đã nhập thành công ${count} khách hàng!${errors > 0 ? ` (${errors} lỗi)` : ''}`);
+          if (errors > 0) {
+            console.log("Import Errors:", errorMessages);
+          }
+          window.location.reload();
+        } else {
+          alert(errors > 0 ? `Không thể nhập khách hàng. Có ${errors} lỗi xảy ra. Xem console để biết chi tiết.` : 'Không tìm thấy dữ liệu hợp lệ để nhập. Vui lòng kiểm tra tiêu đề cột (Họ tên, SĐT).');
+          console.log("Import Errors:", errorMessages);
+        }
+        if (e.target) e.target.value = '';
       },
       error: (error) => {
         console.error("Papa Parse Error:", error);
@@ -681,7 +749,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                     <label className="text-sm font-medium text-gray-700">Ngày tư vấn</label>
                     <input
                       type="date"
-                      value={new Date(formData.consultationDate).toISOString().split('T')[0]}
+                      value={safeGetISODate(formData.consultationDate)}
                       onChange={(e) => setFormData({...formData, consultationDate: new Date(e.target.value).getTime()})}
                       className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
@@ -794,7 +862,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       <label className="text-sm font-medium text-gray-700">Thời gian hẹn</label>
                       <input
                         type="datetime-local"
-                        value={formData.appointmentTime ? new Date(formData.appointmentTime - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16) : ''}
+                        value={safeGetISODateTime(formData.appointmentTime)}
                         onChange={(e) => setFormData({...formData, appointmentTime: e.target.value ? new Date(e.target.value).getTime() : 0})}
                         className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />

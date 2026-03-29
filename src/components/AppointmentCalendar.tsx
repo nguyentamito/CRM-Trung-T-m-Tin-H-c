@@ -113,26 +113,31 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
   useEffect(() => {
     if (!profile) return;
 
-    const q = profile.role === 'admin'
-      ? query(collection(db, 'appointments'), orderBy('time', 'asc'))
-      : query(collection(db, 'appointments'), where('staffId', '==', profile.uid), orderBy('time', 'asc'));
+    const fetchData = async () => {
+      try {
+        const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
+        const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Appointment)));
-    });
+        const [appointmentsRes, customersRes] = await Promise.all([
+          fetch(`/api/appointments${staffIdParam}`),
+          fetch(`/api/customers${ownerIdParam}`)
+        ]);
 
-    const qCustomers = profile.role === 'admin'
-      ? query(collection(db, 'customers'), orderBy('name', 'asc'))
-      : query(collection(db, 'customers'), where('ownerId', '==', profile.uid), orderBy('name', 'asc'));
+        const [appointmentsData, customersData] = await Promise.all([
+          appointmentsRes.json(),
+          customersRes.json()
+        ]);
 
-    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer)));
-    });
-
-    return () => {
-      unsub();
-      unsubCustomers();
+        setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
+        setCustomers(Array.isArray(customersData) ? customersData : []);
+      } catch (error) {
+        console.error("Error fetching data:", error);
+      }
     };
+
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
   }, [profile]);
 
   // Effect to automatically update status for past appointments
@@ -145,9 +150,13 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
 
       for (const app of pastAppointments) {
         try {
-          await updateDoc(doc(db, 'appointments', app.id), {
-            status: 'khách không đến',
-            updatedAt: Date.now()
+          await fetch(`/api/appointments/${app.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: 'khách không đến',
+              updatedAt: Date.now()
+            })
           });
         } catch (err) {
           console.error('Error updating past appointment status:', err);
@@ -155,8 +164,8 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
       }
     };
 
-    const intervalId = setInterval(checkPastAppointments, 60000); // Check every minute
-    checkPastAppointments(); // Initial check
+    const intervalId = setInterval(checkPastAppointments, 60000);
+    checkPastAppointments();
 
     return () => clearInterval(intervalId);
   }, [appointments]);
@@ -182,38 +191,54 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
       content: formData.content,
       status: formData.status,
       staffId: profile.uid,
+      updatedAt: Date.now()
     };
 
     try {
       if (selectedAppointment) {
-        await updateDoc(doc(db, 'appointments', selectedAppointment.id), data);
+        await fetch(`/api/appointments/${selectedAppointment.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        await addDoc(collection(db, 'appointments'), {
-          ...data,
-          createdAt: Date.now()
+        await fetch('/api/appointments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...data,
+            createdAt: Date.now()
+          })
         });
       }
       setIsModalOpen(false);
       setSelectedAppointment(null);
+      window.location.reload();
     } catch (err) {
-      handleFirestoreError(err, selectedAppointment ? OperationType.UPDATE : OperationType.CREATE, 'appointments');
+      console.error("Error submitting appointment:", err);
     }
   };
 
   const updateStatus = async (id: string, status: AppointmentStatus) => {
     try {
-      await updateDoc(doc(db, 'appointments', id), { status });
+      await fetch(`/api/appointments/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, updatedAt: Date.now() })
+      });
+      window.location.reload();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `appointments/${id}`);
+      console.error("Error updating status:", err);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Bạn có chắc chắn muốn xóa lịch hẹn này?')) return;
     try {
-      await deleteDoc(doc(db, 'appointments', id));
+      await fetch(`/api/appointments/${id}`, { method: 'DELETE' });
+      window.location.reload();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `appointments/${id}`);
+      console.error("Error deleting appointment:", err);
     }
   };
 

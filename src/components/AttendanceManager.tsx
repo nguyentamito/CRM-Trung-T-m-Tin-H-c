@@ -1,17 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  orderBy, 
-  doc, 
-  updateDoc, 
-  addDoc,
-  getDocs
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
-import { 
   TeachingSession, 
   Attendance, 
   Class, 
@@ -48,38 +36,38 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
   const [selectedSession, setSelectedSession] = useState<TeachingSession | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!profile) return;
 
     const start = startOfDay(selectedDate).getTime();
     const end = endOfDay(selectedDate).getTime();
 
-    const qSessions = query(
-      collection(db, 'teaching_sessions'),
-      where('date', '>=', start),
-      where('date', '<=', end),
-      orderBy('date', 'asc')
-    );
+    try {
+      const [sessionsRes, classesRes, attendanceRes] = await Promise.all([
+        fetch(`/api/teaching_sessions?start=${start}&end=${end}`),
+        fetch('/api/classes'),
+        fetch('/api/attendance')
+      ]);
 
-    const unsubscribeSessions = onSnapshot(qSessions, (snapshot) => {
-      setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TeachingSession)));
+      const [sessionsData, classesData, attendanceData] = await Promise.all([
+        sessionsRes.json(),
+        classesRes.json(),
+        attendanceRes.json()
+      ]);
+
+      setSessions(Array.isArray(sessionsData) ? sessionsData : []);
+      setClasses(Array.isArray(classesData) ? classesData : []);
+      setAttendanceRecords(Array.isArray(attendanceData) ? attendanceData : []);
       setLoading(false);
-    });
+    } catch (error) {
+      console.error("Error fetching attendance data:", error);
+      setLoading(false);
+    }
+  };
 
-    const unsubscribeClasses = onSnapshot(collection(db, 'classes'), (snapshot) => {
-      setClasses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Class)));
-    });
-
-    const unsubscribeAttendance = onSnapshot(collection(db, 'attendance'), (snapshot) => {
-      setAttendanceRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
-    });
-
-    return () => {
-      unsubscribeSessions();
-      unsubscribeClasses();
-      unsubscribeAttendance();
-    };
-  }, [selectedDate]);
+  useEffect(() => {
+    fetchData();
+  }, [selectedDate, profile]);
 
   const handleAttendanceChange = async (studentId: string, studentName: string, status: AttendanceStatus) => {
     if (!selectedSession || !profile) return;
@@ -97,18 +85,27 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
 
     try {
       if (existingRecord) {
-        await updateDoc(doc(db, 'attendance', existingRecord.id), data);
+        await fetch(`/api/attendance/${existingRecord.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
       } else {
-        await addDoc(collection(db, 'attendance'), {
-          ...data,
-          sessionId: selectedSession.id,
-          classId: selectedSession.classId,
-          studentId,
-          studentName,
+        await fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...data,
+            sessionId: selectedSession.id,
+            classId: selectedSession.classId,
+            studentId,
+            studentName,
+          })
         });
       }
+      fetchData();
     } catch (error) {
-      handleFirestoreError(error, existingRecord ? OperationType.UPDATE : OperationType.CREATE, 'attendance');
+      console.error("Error updating attendance:", error);
     }
   };
 

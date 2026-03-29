@@ -9,60 +9,7 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, orderBy } from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { Subject, UserProfile } from '../types';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 interface SubjectManagementProps {
   profile: UserProfile | null;
@@ -76,16 +23,20 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
 
-  useEffect(() => {
-    const q = query(collection(db, 'subjects'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject)));
+  const fetchSubjects = async () => {
+    try {
+      const response = await fetch('/api/subjects');
+      const data = await response.json();
+      setSubjects(Array.isArray(data) ? data : []);
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'subjects');
-    });
+    } catch (error) {
+      console.error("Error fetching subjects:", error);
+      setLoading(false);
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchSubjects();
   }, []);
 
   const handleAddSubject = async (e: React.FormEvent) => {
@@ -93,14 +44,19 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
     if (!newSubjectName.trim()) return;
 
     try {
-      await addDoc(collection(db, 'subjects'), {
-        name: newSubjectName.trim(),
-        createdAt: Date.now()
+      await fetch('/api/subjects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newSubjectName.trim(),
+          createdAt: Date.now()
+        })
       });
       setNewSubjectName('');
       setIsAdding(false);
+      fetchSubjects();
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'subjects');
+      console.error("Error adding subject:", err);
     }
   };
 
@@ -108,13 +64,18 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
     if (!editingName.trim()) return;
 
     try {
-      await updateDoc(doc(db, 'subjects', id), {
-        name: editingName.trim()
+      await fetch(`/api/subjects/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editingName.trim()
+        })
       });
       setEditingId(null);
       setEditingName('');
+      fetchSubjects();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `subjects/${id}`);
+      console.error("Error updating subject:", err);
     }
   };
 
@@ -122,9 +83,12 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
     if (!window.confirm('Bạn có chắc chắn muốn xóa môn học này?')) return;
 
     try {
-      await deleteDoc(doc(db, 'subjects', id));
+      await fetch(`/api/subjects/${id}`, {
+        method: 'DELETE'
+      });
+      fetchSubjects();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `subjects/${id}`);
+      console.error("Error deleting subject:", err);
     }
   };
 
