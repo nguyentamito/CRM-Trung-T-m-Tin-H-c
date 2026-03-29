@@ -8,7 +8,7 @@ import Dashboard from './components/Dashboard';
 import CustomerList from './components/CustomerList';
 import AppointmentCalendar from './components/AppointmentCalendar';
 import SubjectManagement from './components/SubjectManagement';
-import { LogIn, Loader2, AlertCircle } from 'lucide-react';
+import { LogIn, Loader2, AlertCircle, Clock, LogOut } from 'lucide-react';
 
 import TeacherList from './components/TeacherList';
 import TAList from './components/TAList';
@@ -16,6 +16,7 @@ import ClassList from './components/ClassList';
 import AttendanceManager from './components/AttendanceManager';
 import ReceiptManager from './components/ReceiptManager';
 import PaymentVoucherManager from './components/PaymentVoucherManager';
+import UserManagement from './components/UserManagement';
 import Reports from './components/Reports';
 import Settings from './components/Settings';
 
@@ -41,17 +42,32 @@ export default function App() {
       if (user) {
         setUser(user);
         try {
+          const isAdmin = user.email?.toLowerCase() === 'nguyentamito@gmail.com';
           const userDoc = await getDoc(doc(db, 'users', user.uid));
+          
           if (userDoc.exists()) {
-            setProfile(userDoc.data() as UserProfile);
+            const existingProfile = userDoc.data() as UserProfile;
+            // Ensure admin is always approved and has correct role
+            if (isAdmin && (!existingProfile.isApproved || existingProfile.role !== 'admin')) {
+              const updatedProfile = { 
+                ...existingProfile, 
+                role: 'admin' as const, 
+                isApproved: true 
+              };
+              await setDoc(doc(db, 'users', user.uid), updatedProfile);
+              setProfile(updatedProfile);
+            } else {
+              setProfile(existingProfile);
+            }
           } else {
             // Create default profile for new user
             const newProfile: UserProfile = {
               uid: user.uid,
               email: user.email || '',
               displayName: user.displayName || 'Người dùng',
-              role: user.email === 'nguyentamito@gmail.com' ? 'admin' : 'staff',
-              photoURL: user.photoURL || undefined
+              role: isAdmin ? 'admin' : 'staff',
+              photoURL: user.photoURL || undefined,
+              isApproved: isAdmin // Admin is auto-approved
             };
             await setDoc(doc(db, 'users', user.uid), newProfile);
             setProfile(newProfile);
@@ -133,6 +149,45 @@ export default function App() {
     );
   }
 
+  const isSystemAdmin = user?.email?.toLowerCase() === 'nguyentamito@gmail.com';
+
+  if (user && profile && !profile.isApproved && profile.role !== 'admin' && !isSystemAdmin) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-gray-100">
+          <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Clock className="w-8 h-8 text-orange-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Đang chờ phê duyệt</h1>
+          <p className="text-gray-600 mb-8">
+            Tài khoản của bạn đã được đăng ký thành công. Vui lòng liên hệ quản trị viên để được phê duyệt truy cập vào hệ thống.
+          </p>
+          <div className="space-y-4">
+            <div className="p-4 bg-gray-50 rounded-xl text-left">
+              <p className="text-xs text-gray-500 uppercase font-bold mb-1">Thông tin tài khoản</p>
+              <p className="text-sm font-semibold text-gray-900">{profile.displayName}</p>
+              <p className="text-sm text-gray-600">{profile.email}</p>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white hover:bg-blue-700 py-3 rounded-xl transition-all font-bold shadow-lg"
+            >
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Làm mới trang
+            </button>
+            <button
+              onClick={logout}
+              className="w-full flex items-center justify-center gap-2 text-gray-500 hover:text-red-600 hover:bg-red-50 py-3 rounded-xl transition-all font-medium"
+            >
+              <LogOut className="w-5 h-5" />
+              Đăng xuất
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-4">
@@ -183,6 +238,7 @@ export default function App() {
             {activeTab === 'attendance' && <AttendanceManager profile={profile} />}
             {activeTab === 'receipts' && <ReceiptManager profile={profile} />}
             {activeTab === 'payments' && <PaymentVoucherManager profile={profile} />}
+            {activeTab === 'users' && profile?.role === 'admin' && <UserManagement profile={profile} />}
             {activeTab === 'reports' && (
               <Reports 
                 customers={customers} 

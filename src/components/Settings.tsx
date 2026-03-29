@@ -13,7 +13,9 @@ import {
   Globe, 
   Save,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  User as UserIcon,
+  Loader2
 } from 'lucide-react';
 
 interface SettingsProps {
@@ -66,6 +68,27 @@ export default function Settings({ profile }: SettingsProps) {
     }
   };
 
+  const [userDisplayName, setUserDisplayName] = useState(profile?.displayName || '');
+  const [updatingProfile, setUpdatingProfile] = useState(false);
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return;
+    setUpdatingProfile(true);
+    try {
+      await setDoc(doc(db, 'users', profile.uid), {
+        ...profile,
+        displayName: userDisplayName
+      });
+      setMessage({ type: 'success', text: 'Cập nhật thông tin cá nhân thành công!' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${profile.uid}`);
+      setMessage({ type: 'error', text: 'Có lỗi xảy ra khi cập nhật thông tin cá nhân.' });
+    } finally {
+      setUpdatingProfile(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -75,10 +98,41 @@ export default function Settings({ profile }: SettingsProps) {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-800">Cài đặt hệ thống</h2>
-        <p className="text-gray-600">Quản lý thông tin trung tâm hiển thị trên biên lai và các văn bản khác.</p>
+    <div className="max-w-4xl mx-auto p-6 space-y-8">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-800">Cài đặt</h2>
+        <p className="text-gray-600">Quản lý thông tin cá nhân và hệ thống.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-6 border-b border-gray-100 bg-gray-50">
+          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+            <UserIcon className="w-5 h-5 text-blue-600" />
+            Thông tin cá nhân
+          </h3>
+        </div>
+        <form onSubmit={handleUpdateProfile} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tên hiển thị</label>
+            <input
+              type="text"
+              value={userDisplayName}
+              onChange={(e) => setUserDisplayName(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              placeholder="Nhập tên của bạn..."
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={updatingProfile}
+              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-medium disabled:opacity-50"
+            >
+              {updatingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Cập nhật tên
+            </button>
+          </div>
+        </form>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

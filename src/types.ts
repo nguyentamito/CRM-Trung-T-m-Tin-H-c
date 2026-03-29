@@ -48,8 +48,9 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  role: 'admin' | 'staff' | 'teacher';
+  role: 'admin' | 'staff' | 'teacher' | 'ta' | 'collaborator';
   photoURL?: string;
+  isApproved: boolean;
 }
 
 export interface Subject {

@@ -8,9 +8,10 @@
         "uid": { "type": "string" },
         "email": { "type": "string" },
         "displayName": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "staff"] }
+        "role": { "type": "string", "enum": ["admin", "staff", "teacher"] },
+        "isApproved": { "type": "boolean" }
       },
-      "required": ["uid", "email", "role"]
+      "required": ["uid", "email", "role", "isApproved"]
     },
     "Customer": {
       "title": "Customer",

@@ -5,6 +5,7 @@ import {
   Calendar, 
   LogOut, 
   User as UserIcon,
+  ShieldCheck,
   ChevronRight,
   MessageSquare,
   BookOpen,
@@ -38,6 +39,7 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
 
   if (profile?.role === 'admin') {
     menuItems.push(
+      { id: 'users', label: 'Người dùng', icon: ShieldCheck },
       { id: 'subjects', label: 'Môn học', icon: BookOpen },
       { id: 'teachers', label: 'Giáo viên', icon: UserIcon },
       { id: 'tas', label: 'Trợ giảng', icon: UserIcon },
@@ -89,7 +91,12 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
           )}
           <div className="hidden md:block overflow-hidden">
             <p className="text-sm font-semibold text-gray-900 truncate">{profile?.displayName}</p>
-            <p className="text-xs text-gray-500 capitalize">{profile?.role}</p>
+            <p className="text-xs text-gray-500">
+              {profile?.role === 'admin' ? 'Quản trị viên' : 
+               profile?.role === 'teacher' ? 'Giáo viên' : 
+               profile?.role === 'ta' ? 'Trợ giảng' : 
+               profile?.role === 'collaborator' ? 'Cộng tác viên' : 'Nhân viên'}
+            </p>
           </div>
         </div>
         
