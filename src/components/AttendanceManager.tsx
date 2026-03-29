@@ -28,7 +28,9 @@ import {
   Search,
   Filter,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  MapPin,
+  ExternalLink
 } from 'lucide-react';
 import { format, startOfDay, endOfDay, addDays, subDays } from 'date-fns';
 
@@ -225,6 +227,7 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
             <thead>
               <tr className="bg-gray-50/50">
                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Lớp học & Môn học</th>
+                <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Phòng học</th>
                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Thời gian</th>
                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Giáo viên</th>
                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Sĩ số</th>
@@ -239,6 +242,29 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
                     <td className="px-6 py-4">
                       <div className="font-bold text-gray-900">{session.className}</div>
                       <div className="text-xs text-gray-500">{session.subject}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      {session.roomName ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                            <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                            {session.roomName}
+                          </div>
+                          {session.roomLink && (
+                            <a 
+                              href={session.roomLink.startsWith('http') ? session.roomLink : `https://${session.roomLink}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5"
+                            >
+                              <ExternalLink className="w-2.5 h-2.5" />
+                              Vào lớp
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">Chưa gán</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2 text-sm text-gray-700">
@@ -307,7 +333,25 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#2D5A4C] text-white">
               <div>
                 <h3 className="text-xl font-bold">Điểm danh buổi học</h3>
-                <p className="text-sm opacity-80">{selectedSession.className} - {format(new Date(selectedSession.date), 'dd/MM/yyyy')}</p>
+                <div className="flex items-center gap-3 text-sm opacity-80">
+                  <span>{selectedSession.className} - {format(new Date(selectedSession.date), 'dd/MM/yyyy')}</span>
+                  {selectedSession.roomName && (
+                    <span className="flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded text-xs">
+                      <MapPin className="w-3 h-3" />
+                      {selectedSession.roomName}
+                      {selectedSession.roomLink && (
+                        <a 
+                          href={selectedSession.roomLink.startsWith('http') ? selectedSession.roomLink : `https://${selectedSession.roomLink}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-1 hover:text-white"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
               <button onClick={() => setIsAttendanceModalOpen(false)} className="text-white/80 hover:text-white transition-colors">
                 <X className="w-6 h-6" />

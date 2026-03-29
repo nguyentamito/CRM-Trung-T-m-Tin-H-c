@@ -11,7 +11,7 @@ import {
   where
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Class, Teacher, TeachingAssistant, Customer, Subject, UserProfile, TeachingSession, Attendance, SessionStatus } from '../types';
+import { Class, Teacher, TeachingAssistant, Customer, Subject, UserProfile, TeachingSession, Attendance, SessionStatus, Room } from '../types';
 import { 
   ChevronLeft,
   ChevronRight,
@@ -25,7 +25,9 @@ import {
   User, 
   BookOpen, 
   Clock, 
-  Filter 
+  Filter,
+  MapPin,
+  AlertTriangle
 } from 'lucide-react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
@@ -41,6 +43,7 @@ export default function ClassList({ profile }: ClassListProps) {
   const [tas, setTAs] = useState<TeachingAssistant[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -73,6 +76,9 @@ export default function ClassList({ profile }: ClassListProps) {
     schedule: '',
     sessions: [] as { dayOfWeek: number; startTime: string; endTime: string }[],
     startDate: format(new Date(), 'yyyy-MM-dd'),
+    roomId: '',
+    roomName: '',
+    roomLink: '',
     status: 'đang học' as Class['status'],
   });
 
@@ -81,6 +87,9 @@ export default function ClassList({ profile }: ClassListProps) {
     date: format(new Date(), 'yyyy-MM-dd'),
     startTime: '08:00',
     endTime: '09:30',
+    roomId: '',
+    roomName: '',
+    roomLink: '',
     status: 'chưa diễn ra' as SessionStatus,
   });
 
@@ -123,6 +132,11 @@ export default function ClassList({ profile }: ClassListProps) {
       setAttendanceRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
     });
 
+    const qRooms = query(collection(db, 'rooms'), orderBy('name', 'asc'));
+    const unsubscribeRooms = onSnapshot(qRooms, (snapshot) => {
+      setRooms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+    });
+
     return () => {
       unsubscribe();
       unsubscribeTeachers();
@@ -131,8 +145,27 @@ export default function ClassList({ profile }: ClassListProps) {
       unsubscribeSubjects();
       unsubscribeSessions();
       unsubscribeAttendance();
+      unsubscribeRooms();
     };
   }, []);
+
+  const checkConflict = (roomId: string, date: number, startTime: string, endTime: string, excludeSessionId?: string) => {
+    if (!roomId) return null;
+    
+    const conflict = teachingSessions.find(s => {
+      if (s.id === excludeSessionId) return false;
+      if (s.roomId !== roomId) return false;
+      if (!isSameDay(new Date(s.date), new Date(date))) return false;
+      
+      // Overlap logic: (StartA < EndB) && (EndA > StartB)
+      return (startTime < s.endTime) && (endTime > s.startTime);
+    });
+    
+    if (conflict) {
+      return `Xung đột với lớp ${conflict.className} (${conflict.startTime} - ${conflict.endTime})`;
+    }
+    return null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,11 +173,14 @@ export default function ClassList({ profile }: ClassListProps) {
 
     const selectedTeacher = teachers.find(t => t.id === formData.teacherId);
     const selectedTA = tas.find(t => t.id === formData.taId);
+    const selectedRoom = rooms.find(r => r.id === formData.roomId);
 
     const data = {
       ...formData,
       teacherName: selectedTeacher?.name || '',
       taName: selectedTA?.name || '',
+      roomName: selectedRoom?.name || '',
+      roomLink: selectedRoom?.location || '',
       startDate: new Date(formData.startDate).getTime(),
       sessions: formData.sessions || [],
       updatedAt: Date.now(),
@@ -181,6 +217,8 @@ export default function ClassList({ profile }: ClassListProps) {
     const selectedClass = classes.find(c => c.id === sessionFormData.classId);
     if (!selectedClass) return;
 
+    const selectedRoom = rooms.find(r => r.id === sessionFormData.roomId);
+
     const data = {
       classId: selectedClass.id,
       className: selectedClass.name,
@@ -189,6 +227,9 @@ export default function ClassList({ profile }: ClassListProps) {
       teacherName: selectedClass.teacherName,
       taId: selectedClass.taId || '',
       taName: selectedClass.taName || '',
+      roomId: selectedRoom?.id || '',
+      roomName: selectedRoom?.name || '',
+      roomLink: selectedRoom?.location || '',
       date: new Date(sessionFormData.date).getTime(),
       startTime: sessionFormData.startTime,
       endTime: sessionFormData.endTime,
@@ -209,6 +250,9 @@ export default function ClassList({ profile }: ClassListProps) {
         date: format(new Date(), 'yyyy-MM-dd'),
         startTime: '08:00',
         endTime: '09:30',
+        roomId: '',
+        roomName: '',
+        roomLink: '',
         status: 'chưa diễn ra',
       });
     } catch (error) {
@@ -232,6 +276,9 @@ export default function ClassList({ profile }: ClassListProps) {
       date: format(new Date(session.date), 'yyyy-MM-dd'),
       startTime: session.startTime,
       endTime: session.endTime,
+      roomId: session.roomId || '',
+      roomName: session.roomName || '',
+      roomLink: session.roomLink || '',
       status: session.status,
     });
     setIsSessionModalOpen(true);
@@ -284,6 +331,9 @@ export default function ClassList({ profile }: ClassListProps) {
       teacherName: cls.teacherName,
       taId: cls.taId || '',
       taName: cls.taName || '',
+      roomId: cls.roomId || '',
+      roomName: cls.roomName || '',
+      roomLink: cls.roomLink || '',
       schedule: cls.schedule || '',
       sessions: cls.sessions || [],
       startDate: format(new Date(cls.startDate), 'yyyy-MM-dd'),
@@ -304,6 +354,9 @@ export default function ClassList({ profile }: ClassListProps) {
       teacherName: '',
       taId: '',
       taName: '',
+      roomId: '',
+      roomName: '',
+      roomLink: '',
       schedule: '',
       sessions: [],
       startDate: format(new Date(), 'yyyy-MM-dd'),
@@ -693,6 +746,9 @@ export default function ClassList({ profile }: ClassListProps) {
                                 date: format(new Date(), 'yyyy-MM-dd'),
                                 startTime: '08:00',
                                 endTime: '09:30',
+                                roomId: cls.roomId || '',
+                                roomName: cls.roomName || '',
+                                roomLink: cls.roomLink || '',
                                 status: 'đang học',
                               });
                               setIsSessionModalOpen(true);
@@ -791,6 +847,9 @@ export default function ClassList({ profile }: ClassListProps) {
                           date: format(date, 'yyyy-MM-dd'),
                           startTime: '08:00',
                           endTime: '09:30',
+                          roomId: filteredClass?.roomId || '',
+                          roomName: filteredClass?.roomName || '',
+                          roomLink: filteredClass?.roomLink || '',
                           status: 'chưa diễn ra',
                         });
                         setIsSessionModalOpen(true);
@@ -952,6 +1011,9 @@ export default function ClassList({ profile }: ClassListProps) {
                   date: format(new Date(), 'yyyy-MM-dd'),
                   startTime: '08:00',
                   endTime: '09:30',
+                  roomId: '',
+                  roomName: '',
+                  roomLink: '',
                   status: 'chưa diễn ra',
                 });
               }} className="text-white/80 hover:text-white transition-colors">
@@ -1025,6 +1087,44 @@ export default function ClassList({ profile }: ClassListProps) {
                   <option value="kết thúc">Kết thúc (Lớp)</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phòng học *</label>
+                <select
+                  required
+                  value={sessionFormData.roomId}
+                  onChange={(e) => setSessionFormData({ ...sessionFormData, roomId: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                >
+                  <option value="">Chọn phòng học</option>
+                  {rooms.map(r => (
+                    <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
+                  ))}
+                </select>
+              </div>
+              {sessionFormData.roomId && (
+                <div className="text-xs text-gray-500 flex items-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  {rooms.find(r => r.id === sessionFormData.roomId)?.location}
+                </div>
+              )}
+              {(() => {
+                const conflict = checkConflict(
+                  sessionFormData.roomId,
+                  new Date(sessionFormData.date).getTime(),
+                  sessionFormData.startTime,
+                  sessionFormData.endTime,
+                  editingSession?.id
+                );
+                if (conflict) {
+                  return (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-red-700 text-sm">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{conflict}</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -1157,6 +1257,19 @@ export default function ClassList({ profile }: ClassListProps) {
                       onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phòng học mặc định</label>
+                    <select
+                      value={formData.roomId}
+                      onChange={(e) => setFormData({ ...formData, roomId: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                    >
+                      <option value="">Chọn phòng học</option>
+                      {rooms.map(r => (
+                        <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 

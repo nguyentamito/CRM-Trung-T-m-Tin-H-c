@@ -5,6 +5,7 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc,
+  deleteDoc,
   orderBy,
   where,
   doc,
@@ -25,7 +26,10 @@ import {
   Printer,
   ChevronLeft,
   ChevronRight,
-  Edit2
+  Edit2,
+  Trash2,
+  Paperclip,
+  Eye
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, parseISO } from 'date-fns';
 import { cn, formatNumber } from '../lib/utils';
@@ -47,6 +51,8 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   });
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [receiptToDelete, setReceiptToDelete] = useState<Receipt | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -60,7 +66,9 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     amount: 0,
     type: 'đóng 100%' as ReceiptType,
     paymentMethod: 'chuyển khoản' as PaymentMethod,
-    note: ''
+    note: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    attachmentUrl: ''
   });
 
   const isAdmin = profile?.role === 'admin';
@@ -127,20 +135,23 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
       type: formData.type,
       paymentMethod: formData.paymentMethod,
       note: formData.note || '',
+      attachmentUrl: formData.attachmentUrl || '',
       staffId: profile.uid,
       staffName: profile.displayName || profile.email || 'Unknown',
+      date: new Date(formData.date).getTime(),
+      status: isAdmin ? 'approved' : 'pending',
       updatedAt: Date.now()
     };
 
     try {
       if (selectedReceipt) {
-        const receiptNumber = selectedReceipt.receiptNumber || `PT-${format(new Date(selectedReceipt.createdAt || Date.now()), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const receiptNumber = selectedReceipt.receiptNumber || `PT-${format(new Date(selectedReceipt.date || selectedReceipt.createdAt || Date.now()), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
         await updateDoc(doc(db, 'receipts', selectedReceipt.id), {
           ...data,
           receiptNumber
         });
       } else {
-        const receiptNumber = `PT-${format(new Date(), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const receiptNumber = `PT-${format(new Date(data.date), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
         await addDoc(collection(db, 'receipts'), { 
           ...data, 
           receiptNumber,
@@ -154,7 +165,9 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
         amount: 0,
         type: 'đóng 100%',
         paymentMethod: 'chuyển khoản',
-        note: ''
+        note: '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        attachmentUrl: ''
       });
     } catch (error) {
       handleFirestoreError(error, selectedReceipt ? OperationType.UPDATE : OperationType.CREATE, 'receipts');
@@ -167,7 +180,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                          (r.receiptNumber && r.receiptNumber.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = typeFilter === 'all' || r.type === typeFilter;
     
-    const receiptDate = new Date(r.createdAt);
+    const receiptDate = new Date(r.date || r.createdAt);
     const startDate = startOfDay(parseISO(dateRange.start));
     const endDate = endOfDay(parseISO(dateRange.end));
     const matchesDate = isWithinInterval(receiptDate, { start: startDate, end: endDate });
@@ -178,15 +191,46 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   const totalCollected = filteredReceipts.reduce((sum, r) => sum + r.amount, 0);
 
   const openEditModal = (receipt: Receipt) => {
+    if (!isAdmin) return;
     setSelectedReceipt(receipt);
     setFormData({
       customerId: receipt.customerId,
       amount: receipt.amount,
       type: receipt.type,
       paymentMethod: receipt.paymentMethod,
-      note: receipt.note || ''
+      note: receipt.note || '',
+      date: format(receipt.date || receipt.createdAt, 'yyyy-MM-dd'),
+      attachmentUrl: receipt.attachmentUrl || ''
     });
     setIsModalOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!receiptToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'receipts', receiptToDelete.id));
+      setIsDeleteModalOpen(false);
+      setReceiptToDelete(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'receipts');
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Limit file size to 800KB to stay safe within Firestore 1MB limit
+    if (file.size > 800 * 1024) {
+      alert('Kích thước file quá lớn (tối đa 800KB). Vui lòng chọn file nhỏ hơn.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormData({ ...formData, attachmentUrl: reader.result as string });
+    };
+    reader.readAsDataURL(file);
   };
 
   if (loading) {
@@ -302,6 +346,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                   <option value="cọc">Cọc</option>
                   <option value="đóng tất">Đóng tất</option>
                   <option value="đóng 100%">Đóng 100%</option>
+                  <option value="thu khác">Thu khác</option>
                 </select>
               </div>
             </div>
@@ -328,8 +373,13 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-blue-600">{receipt.receiptNumber || 'N/A'}</div>
                     <div className="text-xs text-gray-500">
-                      {format(receipt.createdAt, 'dd/MM/yyyy HH:mm')}
+                      {format(receipt.date || receipt.createdAt, 'dd/MM/yyyy')}
                     </div>
+                    {receipt.status === 'pending' && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 mt-1">
+                        Chờ duyệt
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <div className="font-medium text-gray-900">{receipt.customerName}</div>
@@ -363,13 +413,51 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => openEditModal(receipt)}
-                        className="p-2 text-gray-400 hover:text-blue-600 transition-colors" 
-                        title="Chỉnh sửa phiếu thu"
-                      >
-                        <Edit2 size={18} />
-                      </button>
+                      {isAdmin && (
+                        <>
+                          <button 
+                            onClick={() => openEditModal(receipt)}
+                            className="p-2 text-gray-400 hover:text-blue-600 transition-colors" 
+                            title="Chỉnh sửa phiếu thu"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          {receipt.status === 'pending' && (
+                            <button 
+                              onClick={async () => {
+                                try {
+                                  await updateDoc(doc(db, 'receipts', receipt.id), { status: 'approved', updatedAt: Date.now() });
+                                } catch (error) {
+                                  handleFirestoreError(error, OperationType.UPDATE, 'receipts');
+                                }
+                              }}
+                              className="p-2 text-gray-400 hover:text-green-600 transition-colors" 
+                              title="Duyệt phiếu thu"
+                            >
+                              <Plus size={18} />
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
+                              setReceiptToDelete(receipt);
+                              setIsDeleteModalOpen(true);
+                            }}
+                            className="p-2 text-gray-400 hover:text-red-600 transition-colors" 
+                            title="Xóa phiếu thu"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </>
+                      )}
+                      {receipt.attachmentUrl && (
+                        <button 
+                          onClick={() => window.open(receipt.attachmentUrl, '_blank')}
+                          className="p-2 text-gray-400 hover:text-blue-600 transition-colors" 
+                          title="Xem chứng từ"
+                        >
+                          <Eye size={18} />
+                        </button>
+                      )}
                       <button 
                         onClick={() => printReceipt(receipt, centerInfo)}
                         className="p-2 text-gray-400 hover:text-[#2D5A4C] transition-colors" 
@@ -461,6 +549,16 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Ngày thu *</label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền thu (VNĐ) *</label>
                   <input
                     type="number"
@@ -470,19 +568,21 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Loại thu *</label>
-                  <select
-                    required
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as ReceiptType })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                  >
-                    <option value="cọc">Cọc</option>
-                    <option value="đóng tất">Đóng tất</option>
-                    <option value="đóng 100%">Đóng 100%</option>
-                  </select>
-                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Loại thu *</label>
+                <select
+                  required
+                  value={formData.type}
+                  onChange={(e) => setFormData({ ...formData, type: e.target.value as ReceiptType })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                >
+                  <option value="cọc">Cọc</option>
+                  <option value="đóng tất">Đóng tất</option>
+                  <option value="đóng 100%">Đóng 100%</option>
+                  <option value="thu khác">Thu khác</option>
+                </select>
               </div>
 
               <div>
@@ -512,9 +612,42 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                   value={formData.note}
                   onChange={(e) => setFormData({ ...formData, note: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                  rows={3}
+                  rows={2}
                   placeholder="Thông tin thêm về khoản thu..."
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Chứng từ (Tùy chọn)</label>
+                <div className="flex items-center gap-3">
+                  <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-[#2D5A4C] hover:bg-gray-50 cursor-pointer transition-all">
+                    <Paperclip size={18} className="text-gray-400" />
+                    <span className="text-sm text-gray-500 font-medium">
+                      {formData.attachmentUrl ? 'Đã chọn chứng từ' : 'Tải lên chứng từ (Ảnh/PDF)'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                  {formData.attachmentUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, attachmentUrl: '' })}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Xóa chứng từ"
+                    >
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+                {formData.attachmentUrl && formData.attachmentUrl.startsWith('data:image') && (
+                  <div className="mt-2 relative w-20 h-20 rounded-lg overflow-hidden border border-gray-100">
+                    <img src={formData.attachmentUrl} alt="Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 pt-4">
@@ -536,6 +669,40 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Xác nhận xóa</h2>
+              <button onClick={() => setIsDeleteModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-600">
+                Bạn có chắc chắn muốn xóa phiếu thu <span className="font-bold text-gray-900">{receiptToDelete?.receiptNumber}</span>? 
+                Hành động này không thể hoàn tác.
+              </p>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+                >
+                  Xác nhận xóa
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

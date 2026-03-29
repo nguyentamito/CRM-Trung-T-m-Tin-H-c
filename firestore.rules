@@ -51,7 +51,7 @@ service cloud.firestore {
     //   - time: number (required)
     //   - content: string (required)
     //   - staffId: string (required)
-    //   - status: string (required, enum: ['đã diễn ra', 'hoãn', 'hủy', 'chưa diễn ra'])
+    //   - status: string (required, enum: ['đã diễn ra', 'hoãn', 'hủy', 'chưa diễn ra', 'khách không đến'])
     //   - createdAt: number (required)
     //
     // Collection: subjects
@@ -209,7 +209,7 @@ service cloud.firestore {
       return data.keys().hasAll(['customerId', 'customerName', 'customerPhone', 'time', 'content', 'staffId', 'status', 'createdAt']) &&
              data.customerId is string && data.customerName is string && data.customerPhone is string &&
              data.time is number && data.content is string && data.content.size() < 1000 &&
-             data.staffId is string && data.status in ['đã diễn ra', 'hoãn', 'hủy', 'chưa diễn ra'] &&
+             data.staffId is string && data.status in ['đã diễn ra', 'hoãn', 'hủy', 'chưa diễn ra', 'khách không đến'] &&
              data.createdAt is number;
     }
 
@@ -242,7 +242,10 @@ service cloud.firestore {
              (!('taId' in data) || data.taId is string) &&
              (!('taName' in data) || data.taName is string) &&
              (!('schedule' in data) || data.schedule is string) &&
-             (!('startDate' in data) || data.startDate is number);
+             (!('startDate' in data) || data.startDate is number) &&
+             (!('roomId' in data) || data.roomId is string) &&
+             (!('roomName' in data) || data.roomName is string) &&
+             (!('roomLink' in data) || data.roomLink is string);
     }
 
     function isValidTeachingSession(data) {
@@ -253,7 +256,10 @@ service cloud.firestore {
              data.status in ['đang học', 'kết thúc', 'tạm dừng'] &&
              data.createdAt is number &&
              (!('taId' in data) || data.taId is string) &&
-             (!('taName' in data) || data.taName is string);
+             (!('taName' in data) || data.taName is string) &&
+             (!('roomId' in data) || data.roomId is string) &&
+             (!('roomName' in data) || data.roomName is string) &&
+             (!('roomLink' in data) || data.roomLink is string);
     }
 
     function isValidAttendance(data) {
@@ -266,15 +272,19 @@ service cloud.firestore {
     }
 
     function isValidReceipt(data) {
-      return data.keys().hasAll(['customerId', 'customerName', 'customerPhone', 'subject', 'amount', 'totalAmount', 'remainingAmount', 'type', 'paymentMethod', 'staffId', 'staffName', 'createdAt', 'receiptNumber']) &&
+      return data.keys().hasAll(['customerId', 'customerName', 'customerPhone', 'subject', 'amount', 'totalAmount', 'remainingAmount', 'type', 'paymentMethod', 'staffId', 'staffName', 'date', 'status', 'createdAt', 'updatedAt', 'receiptNumber']) &&
              data.customerId is string && data.customerName is string && data.customerPhone is string &&
              data.receiptNumber is string &&
              data.subject is string && data.amount is number && data.totalAmount is number &&
              data.remainingAmount is number &&
-             data.type in ['cọc', 'đóng tất', 'đóng 100%'] &&
+             data.type in ['cọc', 'đóng tất', 'đóng 100%', 'thu khác'] &&
              data.paymentMethod in ['tiền mặt', 'chuyển khoản', 'khác'] &&
-             data.staffId is string && data.staffName is string && data.createdAt is number &&
-             (!('note' in data) || data.note is string);
+             data.staffId is string && data.staffName is string && 
+             data.date is number &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.createdAt is number && data.updatedAt is number &&
+             (!('note' in data) || data.note is string) &&
+             (!('attachmentUrl' in data) || data.attachmentUrl is string);
     }
 
     function isValidCenterInfo(data) {
@@ -285,7 +295,7 @@ service cloud.firestore {
     }
 
     function isValidPaymentVoucher(data) {
-      return data.keys().hasAll(['voucherNumber', 'category', 'recipientName', 'amount', 'description', 'paymentMethod', 'staffId', 'staffName', 'createdAt', 'updatedAt']) &&
+      return data.keys().hasAll(['voucherNumber', 'category', 'recipientName', 'amount', 'description', 'paymentMethod', 'staffId', 'staffName', 'date', 'status', 'createdAt', 'updatedAt']) &&
              data.voucherNumber is string &&
              data.category in ['lương nhân viên', 'lương giáo viên', 'lương trợ giảng', 'tiền nhà', 'tiền điện', 'tiền nước', 'văn phòng phẩm', 'marketing', 'khác'] &&
              data.recipientName is string && data.recipientName.size() > 0 &&
@@ -293,8 +303,19 @@ service cloud.firestore {
              data.description is string &&
              data.paymentMethod in ['tiền mặt', 'chuyển khoản', 'khác'] &&
              data.staffId is string && data.staffName is string &&
+             data.date is number &&
+             data.status in ['pending', 'approved', 'rejected'] &&
              data.createdAt is number && data.updatedAt is number &&
-             (!('recipientId' in data) || data.recipientId is string);
+             (!('recipientId' in data) || data.recipientId is string) &&
+             (!('attachmentUrl' in data) || data.attachmentUrl is string);
+    }
+
+    function isValidRoom(data) {
+      return data.keys().hasAll(['name', 'type', 'location', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.type in ['Phòng máy tính', 'Phòng lý thuyết', 'Phòng Online', 'Gia Sư', 'Doanh nghiệp'] &&
+             data.location is string &&
+             data.createdAt is number && data.updatedAt is number;
     }
 
     // ===============================================================
@@ -388,6 +409,12 @@ service cloud.firestore {
       allow read: if isAdmin() || isApproved();
       allow create: if (isAdmin() || (isApproved() && isStaff())) && isValidPaymentVoucher(request.resource.data);
       allow update: if isAdmin() && isValidPaymentVoucher(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isAdmin() || isApproved();
+      allow create, update: if isAdmin() && isValidRoom(request.resource.data);
       allow delete: if isAdmin();
     }
   }

@@ -30,7 +30,7 @@ export interface Interaction {
   createdAt: number;
 }
 
-export type AppointmentStatus = 'đã diễn ra' | 'hoãn' | 'hủy' | 'chưa diễn ra';
+export type AppointmentStatus = 'đã diễn ra' | 'hoãn' | 'hủy' | 'chưa diễn ra' | 'khách không đến';
 
 export interface Appointment {
   id: string;
@@ -78,6 +78,17 @@ export interface TeachingAssistant {
 
 export type ClassStatus = 'đang học' | 'kết thúc' | 'tạm dừng';
 
+export type RoomType = 'Phòng máy tính' | 'Phòng lý thuyết' | 'Phòng Online' | 'Gia Sư' | 'Doanh nghiệp';
+
+export interface Room {
+  id: string;
+  name: string;
+  type: RoomType;
+  location: string; // address or link
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Session {
   dayOfWeek: number; // 0: Sunday, 1: Monday, ..., 6: Saturday
   startTime: string; // "HH:mm"
@@ -98,6 +109,9 @@ export interface Class {
   sessions: Session[];
   startDate: number;
   status: ClassStatus;
+  roomId?: string;
+  roomName?: string;
+  roomLink?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -116,6 +130,9 @@ export interface TeachingSession {
   date: number; // timestamp for the specific day
   startTime: string;
   endTime: string;
+  roomId?: string;
+  roomName?: string;
+  roomLink?: string;
   status: SessionStatus;
   createdAt: number;
 }
@@ -135,7 +152,7 @@ export interface Attendance {
   updatedAt: number;
 }
 
-export type ReceiptType = 'cọc' | 'đóng tất' | 'đóng 100%';
+export type ReceiptType = 'cọc' | 'đóng tất' | 'đóng 100%' | 'thu khác';
 export type PaymentMethod = 'tiền mặt' | 'chuyển khoản' | 'khác';
 
 export interface Receipt {
@@ -153,7 +170,11 @@ export interface Receipt {
   note?: string;
   staffId: string;
   staffName: string;
+  date: number; // The date on the receipt (can be backdated)
+  status: 'pending' | 'approved' | 'rejected';
+  attachmentUrl?: string;
   createdAt: number;
+  updatedAt: number;
 }
 
 export interface CenterInfo {
@@ -177,6 +198,9 @@ export interface PaymentVoucher {
   paymentMethod: PaymentMethod;
   staffId: string;
   staffName: string;
+  date: number; // The date on the voucher (can be backdated)
+  status: 'pending' | 'approved' | 'rejected';
+  attachmentUrl?: string;
   createdAt: number;
   updatedAt: number;
 }

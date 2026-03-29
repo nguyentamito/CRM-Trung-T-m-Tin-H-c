@@ -8,13 +8,17 @@ import {
   History,
   MessageSquare,
   ExternalLink,
-  Receipt as ReceiptIcon
+  Receipt as ReceiptIcon,
+  Upload,
+  Paperclip,
+  X
 } from 'lucide-react';
-import { collection, query, onSnapshot, where, addDoc, updateDoc, deleteDoc, doc, orderBy, limit } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, addDoc, updateDoc, deleteDoc, doc, orderBy, limit, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Customer, UserProfile, CustomerStatus, CustomerSource, Interaction, InteractionStatus, Subject, ReceiptType, PaymentMethod, Receipt } from '../types';
 import { cn, formatDate, formatOnlyDate, formatNumber } from '../lib/utils';
 import InteractionTimeline from './InteractionTimeline';
+import Papa from 'papaparse';
 
 enum OperationType {
   CREATE = 'create',
@@ -84,12 +88,15 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const [isQuickNoteOpen, setIsQuickNoteOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState<string | null>(null);
   const [receiptData, setReceiptData] = useState({
     amount: 0,
     type: 'đóng 100%' as ReceiptType,
     paymentMethod: 'chuyển khoản' as PaymentMethod,
-    note: ''
+    note: '',
+    date: new Date().toISOString().split('T')[0],
+    attachmentUrl: ''
   });
   const [quickNoteData, setQuickNoteData] = useState({
     content: '',
@@ -173,6 +180,10 @@ export default function CustomerList({ profile }: CustomerListProps) {
     
     const remainingAmount = totalAmount - totalPaid - receiptData.amount;
 
+    const isAdmin = profile.role === 'admin';
+    const receiptDate = new Date(receiptData.date).getTime();
+    const receiptNumber = `PT-${formatOnlyDate(receiptDate).replace(/\//g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const data = {
       customerId: selectedCustomer.id,
       customerName: selectedCustomer.name,
@@ -184,9 +195,14 @@ export default function CustomerList({ profile }: CustomerListProps) {
       type: receiptData.type,
       paymentMethod: receiptData.paymentMethod,
       note: receiptData.note,
+      attachmentUrl: receiptData.attachmentUrl || '',
       staffId: profile.uid,
       staffName: profile.displayName || profile.email,
-      createdAt: Date.now()
+      date: receiptDate,
+      status: isAdmin ? 'approved' : 'pending',
+      receiptNumber,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
     };
 
     try {
@@ -196,11 +212,30 @@ export default function CustomerList({ profile }: CustomerListProps) {
         amount: 0,
         type: 'đóng 100%',
         paymentMethod: 'chuyển khoản',
-        note: ''
+        note: '',
+        date: new Date().toISOString().split('T')[0],
+        attachmentUrl: ''
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'receipts');
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Limit file size to 800KB to stay safe within Firestore 1MB limit
+    if (file.size > 800 * 1024) {
+      alert('Kích thước file quá lớn (tối đa 800KB). Vui lòng chọn file nhỏ hơn.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setReceiptData({ ...receiptData, attachmentUrl: reader.result as string });
+    };
+    reader.readAsDataURL(file);
   };
 
   const filteredCustomers = customers.filter(c => {
@@ -346,6 +381,68 @@ export default function CustomerList({ profile }: CustomerListProps) {
     setIsModalOpen(true);
   };
 
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+
+    setIsImporting(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const batch = writeBatch(db);
+        let count = 0;
+
+        for (const row of results.data as any[]) {
+          if (!row.name || !row.phone) continue;
+
+          const customerData = {
+            name: row.name,
+            phone: row.phone,
+            consultationDate: row.consultationDate ? new Date(row.consultationDate).getTime() : Date.now(),
+            fbLink: row.fbLink || '',
+            subject: row.subject || '',
+            status: (row.status || 'Phân vân') as CustomerStatus,
+            notes: row.notes || '',
+            closedAmount: (row.closedAmount || '0').replace(/[^0-9]/g, ""),
+            source: (row.source || 'Facebook') as CustomerSource,
+            ownerId: profile.uid,
+            ownerName: profile.displayName || profile.email || 'Unknown',
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          };
+
+          const newDocRef = doc(collection(db, 'customers'));
+          batch.set(newDocRef, customerData);
+          count++;
+
+          // Firestore batch limit is 500
+          if (count === 500) break;
+        }
+
+        try {
+          if (count > 0) {
+            await batch.commit();
+            alert(`Đã nhập thành công ${count} khách hàng!`);
+          } else {
+            alert('Không tìm thấy dữ liệu hợp lệ để nhập.');
+          }
+        } catch (error) {
+          console.error("Error importing customers:", error);
+          alert('Có lỗi xảy ra khi nhập dữ liệu.');
+        } finally {
+          setIsImporting(false);
+          if (e.target) e.target.value = '';
+        }
+      },
+      error: (error) => {
+        console.error("Papa Parse Error:", error);
+        alert('Lỗi khi đọc file CSV.');
+        setIsImporting(false);
+      }
+    });
+  };
+
   const getStatusBadge = (status: CustomerStatus) => {
     const base = "px-3 py-1 rounded-full text-xs font-medium inline-flex items-center justify-center min-w-[100px]";
     switch (status) {
@@ -365,30 +462,46 @@ export default function CustomerList({ profile }: CustomerListProps) {
           <h1 className="text-2xl font-bold text-gray-900">Quản lý khách hàng & Trao đổi</h1>
           <p className="text-gray-500">Quản lý tập trung thông tin và lịch sử chăm sóc</p>
         </div>
-        <button
-          onClick={() => {
-            setSelectedCustomer(null);
-            setFormData({
-              consultationDate: Date.now(),
-              fbLink: '',
-              name: '',
-              phone: '',
-              subject: '',
-              status: 'Phân vân',
-              notes: '',
-              closedAmount: '',
-              source: 'Facebook' as CustomerSource,
-              initialInteraction: '',
-              appointmentTime: 0,
-              appointmentContent: ''
-            });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-700 transition-all shadow-sm font-medium"
-        >
-          <Plus className="w-5 h-5" />
-          Thêm khách hàng mới
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <label className={cn(
+            "flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all shadow-sm font-medium cursor-pointer border border-gray-200 hover:bg-gray-50",
+            isImporting && "opacity-50 cursor-not-allowed"
+          )}>
+            <Upload className="w-5 h-5 text-gray-600" />
+            <span className="text-gray-700">{isImporting ? 'Đang nhập...' : 'Nhập từ CSV'}</span>
+            <input
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleImportCSV}
+              disabled={isImporting}
+            />
+          </label>
+          <button
+            onClick={() => {
+              setSelectedCustomer(null);
+              setFormData({
+                consultationDate: Date.now(),
+                fbLink: '',
+                name: '',
+                phone: '',
+                subject: '',
+                status: 'Phân vân',
+                notes: '',
+                closedAmount: '',
+                source: 'Facebook' as CustomerSource,
+                initialInteraction: '',
+                appointmentTime: 0,
+                appointmentContent: ''
+              });
+              setIsModalOpen(true);
+            }}
+            className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl hover:bg-blue-700 transition-all shadow-sm font-medium"
+          >
+            <Plus className="w-5 h-5" />
+            Thêm khách hàng mới
+          </button>
+        </div>
       </div>
 
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4">
@@ -775,6 +888,16 @@ export default function CustomerList({ profile }: CustomerListProps) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Ngày thu *</label>
+                  <input
+                    type="date"
+                    required
+                    value={receiptData.date}
+                    onChange={(e) => setReceiptData({ ...receiptData, date: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền thu (VNĐ) *</label>
                   <input
                     type="number"
@@ -784,19 +907,20 @@ export default function CustomerList({ profile }: CustomerListProps) {
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Loại thu *</label>
-                  <select
-                    required
-                    value={receiptData.type}
-                    onChange={(e) => setReceiptData({ ...receiptData, type: e.target.value as ReceiptType })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                  >
-                    <option value="cọc">Cọc</option>
-                    <option value="đóng tất">Đóng tất</option>
-                    <option value="đóng 100%">Đóng 100%</option>
-                  </select>
-                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Loại thu *</label>
+                <select
+                  required
+                  value={receiptData.type}
+                  onChange={(e) => setReceiptData({ ...receiptData, type: e.target.value as ReceiptType })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                >
+                  <option value="cọc">Cọc</option>
+                  <option value="đóng tất">Đóng tất</option>
+                  <option value="đóng 100%">Đóng 100%</option>
+                </select>
               </div>
 
               <div>
@@ -826,9 +950,42 @@ export default function CustomerList({ profile }: CustomerListProps) {
                   value={receiptData.note}
                   onChange={(e) => setReceiptData({ ...receiptData, note: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                  rows={3}
+                  rows={2}
                   placeholder="Thông tin thêm về khoản thu..."
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Chứng từ (Tùy chọn)</label>
+                <div className="flex items-center gap-3">
+                  <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-[#2D5A4C] hover:bg-[#2D5A4C]/5 cursor-pointer transition-all">
+                    <Paperclip size={18} className="text-gray-400" />
+                    <span className="text-sm text-gray-500 font-medium">
+                      {receiptData.attachmentUrl ? 'Đã chọn chứng từ' : 'Tải lên chứng từ (Ảnh/PDF)'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                  {receiptData.attachmentUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setReceiptData({ ...receiptData, attachmentUrl: '' })}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Xóa chứng từ"
+                    >
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+                {receiptData.attachmentUrl && receiptData.attachmentUrl.startsWith('data:image') && (
+                  <div className="mt-2 relative w-20 h-20 rounded-lg overflow-hidden border border-gray-100">
+                    <img src={receiptData.attachmentUrl} alt="Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
               </div>
 
               <div className="flex gap-3 pt-4">

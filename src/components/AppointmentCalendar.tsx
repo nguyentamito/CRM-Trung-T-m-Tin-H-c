@@ -135,6 +135,32 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
     };
   }, [profile]);
 
+  // Effect to automatically update status for past appointments
+  useEffect(() => {
+    const checkPastAppointments = async () => {
+      const now = Date.now();
+      const pastAppointments = appointments.filter(app => 
+        app.time < now && app.status === 'chưa diễn ra'
+      );
+
+      for (const app of pastAppointments) {
+        try {
+          await updateDoc(doc(db, 'appointments', app.id), {
+            status: 'khách không đến',
+            updatedAt: Date.now()
+          });
+        } catch (err) {
+          console.error('Error updating past appointment status:', err);
+        }
+      }
+    };
+
+    const intervalId = setInterval(checkPastAppointments, 60000); // Check every minute
+    checkPastAppointments(); // Initial check
+
+    return () => clearInterval(intervalId);
+  }, [appointments]);
+
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
   const startDate = startOfWeek(monthStart);
@@ -203,6 +229,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
     switch (status) {
       case 'chưa diễn ra': return <span className={cn(base, "bg-blue-100 text-blue-700 border border-blue-200")}>Chưa diễn ra</span>;
       case 'đã diễn ra': return <span className={cn(base, "bg-green-100 text-green-700 border border-green-200")}>Đã diễn ra</span>;
+      case 'khách không đến': return <span className={cn(base, "bg-gray-100 text-gray-700 border border-gray-200")}>Khách không đến</span>;
       case 'hoãn': return <span className={cn(base, "bg-orange-100 text-orange-700 border border-orange-200")}>Hoãn</span>;
       case 'hủy': return <span className={cn(base, "bg-red-100 text-red-700 border border-red-200")}>Hủy</span>;
     }
@@ -397,6 +424,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
                 <option value="all">Tất cả trạng thái</option>
                 <option value="chưa diễn ra">Chưa diễn ra</option>
                 <option value="đã diễn ra">Đã diễn ra</option>
+                <option value="khách không đến">Khách không đến</option>
                 <option value="hoãn">Hoãn</option>
                 <option value="hủy">Hủy</option>
               </select>
@@ -522,6 +550,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
                   >
                     <option value="chưa diễn ra">Chưa diễn ra</option>
                     <option value="đã diễn ra">Đã diễn ra</option>
+                    <option value="khách không đến">Khách không đến</option>
                     <option value="hoãn">Hoãn</option>
                     <option value="hủy">Hủy</option>
                   </select>

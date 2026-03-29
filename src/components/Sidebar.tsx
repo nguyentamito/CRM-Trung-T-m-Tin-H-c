@@ -43,6 +43,7 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
       { id: 'subjects', label: 'Môn học', icon: BookOpen },
       { id: 'teachers', label: 'Giáo viên', icon: UserIcon },
       { id: 'tas', label: 'Trợ giảng', icon: UserIcon },
+      { id: 'rooms', label: 'Phòng học', icon: ShieldCheck },
       { id: 'classes', label: 'Lớp học', icon: Users }
     );
   }

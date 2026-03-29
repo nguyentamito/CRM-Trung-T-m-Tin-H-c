@@ -114,6 +114,9 @@
         "taName": { "type": "string" },
         "schedule": { "type": "string" },
         "startDate": { "type": "number" },
+        "roomId": { "type": "string" },
+        "roomName": { "type": "string" },
+        "roomLink": { "type": "string" },
         "status": { "type": "string", "enum": ["đang học", "kết thúc", "tạm dừng"] },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }
@@ -135,6 +138,9 @@
         "date": { "type": "number" },
         "startTime": { "type": "string" },
         "endTime": { "type": "string" },
+        "roomId": { "type": "string" },
+        "roomName": { "type": "string" },
+        "roomLink": { "type": "string" },
         "status": { "type": "string", "enum": ["đang học", "kết thúc", "tạm dừng"] },
         "createdAt": { "type": "number" }
       },
@@ -171,14 +177,18 @@
         "amount": { "type": "number" },
         "totalAmount": { "type": "number" },
         "remainingAmount": { "type": "number" },
-        "type": { "type": "string", "enum": ["cọc", "đóng tất", "đóng 100%"] },
+        "type": { "type": "string", "enum": ["cọc", "đóng tất", "đóng 100%", "thu khác"] },
         "paymentMethod": { "type": "string", "enum": ["tiền mặt", "chuyển khoản", "khác"] },
         "note": { "type": "string" },
         "staffId": { "type": "string" },
         "staffName": { "type": "string" },
-        "createdAt": { "type": "number" }
+        "date": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "attachmentUrl": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
       },
-      "required": ["customerId", "customerName", "customerPhone", "subject", "amount", "totalAmount", "remainingAmount", "type", "paymentMethod", "staffId", "staffName", "createdAt", "receiptNumber"]
+      "required": ["customerId", "customerName", "customerPhone", "subject", "amount", "totalAmount", "remainingAmount", "type", "paymentMethod", "staffId", "staffName", "date", "status", "createdAt", "updatedAt", "receiptNumber"]
     },
     "CenterInfo": {
       "title": "Center Info",
@@ -206,10 +216,26 @@
         "paymentMethod": { "type": "string", "enum": ["tiền mặt", "chuyển khoản", "khác"] },
         "staffId": { "type": "string" },
         "staffName": { "type": "string" },
+        "date": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "attachmentUrl": { "type": "string" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }
       },
-      "required": ["voucherNumber", "category", "recipientName", "amount", "description", "paymentMethod", "staffId", "staffName", "createdAt", "updatedAt"]
+      "required": ["voucherNumber", "category", "recipientName", "amount", "description", "paymentMethod", "staffId", "staffName", "date", "status", "createdAt", "updatedAt"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "Thông tin phòng học",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Phòng máy tính", "Phòng lý thuyết", "Phòng Online", "Gia Sư", "Doanh nghiệp"] },
+        "location": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "type", "location", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -264,6 +290,10 @@
     "/payment_vouchers/{voucherId}": {
       "schema": "PaymentVoucher",
       "description": "Payment voucher records"
+    },
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Room records"
     }
   }
 }

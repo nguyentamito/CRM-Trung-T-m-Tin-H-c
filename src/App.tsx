@@ -12,6 +12,7 @@ import { LogIn, Loader2, AlertCircle, Clock, LogOut } from 'lucide-react';
 
 import TeacherList from './components/TeacherList';
 import TAList from './components/TAList';
+import RoomList from './components/RoomList';
 import ClassList from './components/ClassList';
 import AttendanceManager from './components/AttendanceManager';
 import ReceiptManager from './components/ReceiptManager';
@@ -234,6 +235,7 @@ export default function App() {
             {activeTab === 'subjects' && <SubjectManagement profile={profile} />}
             {activeTab === 'teachers' && <TeacherList profile={profile} />}
             {activeTab === 'tas' && <TAList profile={profile} />}
+            {activeTab === 'rooms' && <RoomList profile={profile} />}
             {activeTab === 'classes' && <ClassList profile={profile} />}
             {activeTab === 'attendance' && <AttendanceManager profile={profile} />}
             {activeTab === 'receipts' && <ReceiptManager profile={profile} />}
