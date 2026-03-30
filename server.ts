@@ -84,6 +84,24 @@ async function startServer() {
       } else if (voucherAttachmentCol.Type.toLowerCase() !== 'longtext') {
         await pool.query("ALTER TABLE payment_vouchers MODIFY COLUMN attachmentUrl LONGTEXT");
       }
+
+      // Ensure users columns
+      const [userCols]: any = await pool.query("DESCRIBE users");
+      const userColNames = userCols.map((c: any) => c.Field);
+      if (!userColNames.includes('isApproved')) {
+        await pool.query("ALTER TABLE users ADD COLUMN isApproved BOOLEAN DEFAULT FALSE");
+        console.log("Added isApproved column to users table");
+      }
+      if (!userColNames.includes('role')) {
+        await pool.query("ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT 'staff'");
+        console.log("Added role column to users table");
+      }
+      if (!userColNames.includes('createdAt')) {
+        await pool.query("ALTER TABLE users ADD COLUMN createdAt BIGINT");
+      }
+      if (!userColNames.includes('updatedAt')) {
+        await pool.query("ALTER TABLE users ADD COLUMN updatedAt BIGINT");
+      }
     } catch (error) {
       console.error("Error ensuring columns:", error);
     }
@@ -367,7 +385,7 @@ async function startServer() {
   createCrudRoutes("interactions", "interactions", "id", "createdAt");
   createCrudRoutes("subjects", "subjects", "id", "name");
   createCrudRoutes("appointments", "appointments", "id", "time");
-  createCrudRoutes("users", "users", "uid", "uid");
+  createCrudRoutes("users", "users", "uid", "createdAt");
   createCrudRoutes("settings", "center_info", "id", "id");
   createCrudRoutes("classes", "classes", "id", "createdAt");
   createCrudRoutes("teachers", "teachers", "id", "createdAt");

@@ -23,6 +23,7 @@ export default function UserManagement({ profile }: UserManagementProps) {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [approvalFilter, setApprovalFilter] = useState<string>('all');
 
   const fetchUsers = async () => {
     try {
@@ -76,7 +77,8 @@ export default function UserManagement({ profile }: UserManagementProps) {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          [field]: value
+          [field]: value,
+          updatedAt: Date.now()
         })
       });
       fetchUsers();
@@ -90,7 +92,8 @@ export default function UserManagement({ profile }: UserManagementProps) {
   const filteredUsers = users.filter(u => 
     (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
      u.email.toLowerCase().includes(searchTerm.toLowerCase())) &&
-    (roleFilter === 'all' || u.role === roleFilter)
+    (roleFilter === 'all' || u.role === roleFilter) &&
+    (approvalFilter === 'all' || (approvalFilter === 'approved' ? u.isApproved : !u.isApproved))
   );
 
   if (loading) {
@@ -126,12 +129,24 @@ export default function UserManagement({ profile }: UserManagementProps) {
             onChange={(e) => setRoleFilter(e.target.value)}
             className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium"
           >
-            <option value="all">Tất cả</option>
+            <option value="all">Tất cả vai trò</option>
             <option value="admin">Quản trị viên</option>
             <option value="staff">Nhân viên</option>
             <option value="teacher">Giáo viên</option>
             <option value="ta">Trợ giảng</option>
             <option value="collaborator">Cộng tác viên</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-500">Trạng thái:</span>
+          <select
+            value={approvalFilter}
+            onChange={(e) => setApprovalFilter(e.target.value)}
+            className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm font-medium"
+          >
+            <option value="all">Tất cả trạng thái</option>
+            <option value="approved">Đã phê duyệt</option>
+            <option value="pending">Chờ phê duyệt</option>
           </select>
         </div>
       </div>
@@ -140,13 +155,13 @@ export default function UserManagement({ profile }: UserManagementProps) {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Người dùng</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Vai trò hiện tại</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Thao tác</th>
-              </tr>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Người dùng</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ngày tham gia</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Vai trò hiện tại</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Thao tác</th>
+                </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filteredUsers.map((u) => (
@@ -206,9 +221,16 @@ export default function UserManagement({ profile }: UserManagementProps) {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Mail className="w-4 h-4 text-gray-400" />
-                      {u.email}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <Mail className="w-4 h-4 text-gray-400" />
+                        {u.email}
+                      </div>
+                      {u.createdAt && (
+                        <p className="text-xs text-gray-400">
+                          {new Date(u.createdAt).toLocaleDateString('vi-VN')}
+                        </p>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">

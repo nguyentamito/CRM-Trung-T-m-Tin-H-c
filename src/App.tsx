@@ -76,7 +76,9 @@ export default function App() {
               displayName: user.displayName || 'Người dùng',
               role: isAdmin ? 'admin' : 'staff',
               photoURL: user.photoURL || undefined,
-              isApproved: isAdmin // Admin is auto-approved
+              isApproved: isAdmin, // Admin is auto-approved
+              createdAt: Date.now(),
+              updatedAt: Date.now()
             };
             await fetch('/api/users', {
               method: 'POST',
@@ -104,6 +106,16 @@ export default function App() {
 
     const fetchData = async () => {
       try {
+        // If not approved, poll for profile update
+        if (!profile.isApproved && profile.role !== 'admin' && !isSystemAdmin) {
+          const res = await fetch(`/api/users?uid=${profile.uid}`);
+          const users = await res.json();
+          const currentProfile = Array.isArray(users) ? users.find((u: any) => u.uid === profile.uid) : null;
+          if (currentProfile && currentProfile.isApproved) {
+            setProfile(currentProfile);
+          }
+        }
+
         const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
         const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
 

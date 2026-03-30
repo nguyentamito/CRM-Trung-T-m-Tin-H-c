@@ -51,6 +51,8 @@ export interface UserProfile {
   role: 'admin' | 'staff' | 'teacher' | 'ta' | 'collaborator';
   photoURL?: string;
   isApproved: boolean;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface Subject {
