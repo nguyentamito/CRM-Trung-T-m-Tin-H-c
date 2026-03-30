@@ -28,6 +28,68 @@ async function startServer() {
     }
   });
 
+  // Ensure classes table has studentIds and studentNames columns if they are missing
+  const ensureColumns = async () => {
+    try {
+      const pool = poolGetter();
+      if (!pool) return;
+      
+      const [columns]: any = await pool.query("DESCRIBE classes");
+      const columnNames = columns.map((c: any) => c.Field);
+      
+      if (!columnNames.includes('studentIds')) {
+        await pool.query("ALTER TABLE classes ADD COLUMN studentIds TEXT");
+        console.log("Added studentIds column to classes table");
+      }
+      if (!columnNames.includes('studentNames')) {
+        await pool.query("ALTER TABLE classes ADD COLUMN studentNames TEXT");
+        console.log("Added studentNames column to classes table");
+      }
+      if (!columnNames.includes('zaloLink')) {
+        await pool.query("ALTER TABLE classes ADD COLUMN zaloLink TEXT");
+        console.log("Added zaloLink column to classes table");
+      }
+
+      // Ensure teacher columns
+      const [teacherCols]: any = await pool.query("DESCRIBE teachers");
+      const teacherColNames = teacherCols.map((c: any) => c.Field);
+      if (!teacherColNames.includes('dob')) {
+        await pool.query("ALTER TABLE teachers ADD COLUMN dob VARCHAR(255)");
+      }
+      if (!teacherColNames.includes('qualification')) {
+        await pool.query("ALTER TABLE teachers ADD COLUMN qualification VARCHAR(255)");
+      }
+      if (!teacherColNames.includes('pedagogical')) {
+        await pool.query("ALTER TABLE teachers ADD COLUMN pedagogical BOOLEAN DEFAULT FALSE");
+      }
+      if (!teacherColNames.includes('address')) {
+        await pool.query("ALTER TABLE teachers ADD COLUMN address TEXT");
+      }
+
+      // Ensure receipt columns
+      const [receiptCols]: any = await pool.query("DESCRIBE receipts");
+      const receiptColNames = receiptCols.map((c: any) => c.Field);
+      const attachmentUrlCol = receiptCols.find((c: any) => c.Field === 'attachmentUrl');
+      if (!attachmentUrlCol) {
+        await pool.query("ALTER TABLE receipts ADD COLUMN attachmentUrl LONGTEXT");
+      } else if (attachmentUrlCol.Type.toLowerCase() !== 'longtext') {
+        await pool.query("ALTER TABLE receipts MODIFY COLUMN attachmentUrl LONGTEXT");
+      }
+
+      // Ensure payment_vouchers columns
+      const [voucherCols]: any = await pool.query("DESCRIBE payment_vouchers");
+      const voucherAttachmentCol = voucherCols.find((c: any) => c.Field === 'attachmentUrl');
+      if (!voucherAttachmentCol) {
+        await pool.query("ALTER TABLE payment_vouchers ADD COLUMN attachmentUrl LONGTEXT");
+      } else if (voucherAttachmentCol.Type.toLowerCase() !== 'longtext') {
+        await pool.query("ALTER TABLE payment_vouchers MODIFY COLUMN attachmentUrl LONGTEXT");
+      }
+    } catch (error) {
+      console.error("Error ensuring columns:", error);
+    }
+  };
+  ensureColumns();
+
   // Generic CRUD helper
   const createCrudRoutes = (collectionName: string, tableName: string, idColumn: string = "id", orderByColumn?: string) => {
     app.get(`/api/${collectionName}`, async (req, res) => {
@@ -38,7 +100,6 @@ async function startServer() {
         let query = `SELECT * FROM ${tableName}`;
         const params: any[] = [];
         
-        // Simple filtering for ownerId if provided
         const filters: string[] = [];
         if (req.query.ownerId) {
           filters.push("ownerId = ?");
@@ -53,13 +114,35 @@ async function startServer() {
           params.push(req.query.uid);
         }
 
+        // Add date range filtering if start/end are provided
+        const start = req.query.start;
+        const end = req.query.end;
+        if (start || end) {
+          // Determine which column to use for date filtering
+          const [columns]: any = await pool.query(`DESCRIBE ${tableName}`);
+          const columnNames = columns.map((c: any) => c.Field);
+          const dateCol = columnNames.find((c: string) => ['date', 'time', 'consultationDate', 'createdAt'].includes(c));
+          
+          if (dateCol) {
+            if (start) {
+              filters.push(`${dateCol} >= ?`);
+              params.push(Number(start));
+            }
+            if (end) {
+              filters.push(`${dateCol} <= ?`);
+              params.push(Number(end));
+            }
+          }
+        }
+
         if (filters.length > 0) {
           query += " WHERE " + filters.join(" AND ");
         }
         
         // Use provided orderByColumn, or fallback to idColumn
-        const order = orderByColumn || idColumn;
-        query += ` ORDER BY ${order} DESC`;
+        const order = (req.query.order as string) || orderByColumn || idColumn;
+        const direction = (req.query.direction as string) === 'ASC' ? 'ASC' : 'DESC';
+        query += ` ORDER BY ${order} ${direction}`;
         
         const [rows] = await pool.query(query, params);
         res.json(rows);
@@ -126,6 +209,7 @@ async function startServer() {
     app.put(`/api/${collectionName}/:id`, async (req, res) => {
       const { id } = req.params;
       const data = { ...req.body };
+      console.log(`PUT /api/${collectionName}/${id} - Body:`, data);
       
       try {
         const pool = poolGetter();
@@ -279,18 +363,19 @@ async function startServer() {
     }
   });
 
-  createCrudRoutes("customers", "customers", "id", "id");
-  createCrudRoutes("interactions", "interactions", "id", "id");
-  createCrudRoutes("subjects", "subjects", "id", "id");
-  createCrudRoutes("appointments", "appointments", "id", "id");
+  createCrudRoutes("customers", "customers", "id", "consultationDate");
+  createCrudRoutes("interactions", "interactions", "id", "createdAt");
+  createCrudRoutes("subjects", "subjects", "id", "name");
+  createCrudRoutes("appointments", "appointments", "id", "time");
   createCrudRoutes("users", "users", "uid", "uid");
   createCrudRoutes("settings", "center_info", "id", "id");
-  createCrudRoutes("classes", "classes", "id", "id");
-  createCrudRoutes("teachers", "teachers", "id", "id");
-  createCrudRoutes("teaching_assistants", "teaching_assistants", "id", "id");
-  createCrudRoutes("teaching_sessions", "teaching_sessions", "id", "id");
-  createCrudRoutes("attendance", "attendance", "id", "id");
-  createCrudRoutes("payment_vouchers", "payment_vouchers", "id", "id");
+  createCrudRoutes("classes", "classes", "id", "createdAt");
+  createCrudRoutes("teachers", "teachers", "id", "createdAt");
+  createCrudRoutes("teaching_assistants", "teaching_assistants", "id", "createdAt");
+  createCrudRoutes("teaching_sessions", "teaching_sessions", "id", "date");
+  createCrudRoutes("attendance", "attendance", "id", "updatedAt");
+  createCrudRoutes("payment_vouchers", "payment_vouchers", "id", "date");
+  createCrudRoutes("receipts", "receipts", "id", "date");
 
   // Rooms API
   app.get("/api/rooms", async (req, res) => {
@@ -345,38 +430,6 @@ async function startServer() {
       if (!pool) return res.status(503).json({ error: "Database not configured" });
       await pool.query("DELETE FROM rooms WHERE id = ?", [id]);
       res.json({ success: true });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Internal Server Error" });
-    }
-  });
-
-  // Receipts API
-  app.get("/api/receipts", async (req, res) => {
-    try {
-      const pool = poolGetter();
-      if (!pool) return res.status(503).json({ error: "Database not configured" });
-      const [rows] = await pool.query("SELECT * FROM receipts ORDER BY createdAt DESC");
-      res.json(rows);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Internal Server Error" });
-    }
-  });
-
-  app.post("/api/receipts", async (req, res) => {
-    const data = req.body;
-    const fields = Object.keys(data);
-    const placeholders = fields.map(() => "?").join(", ");
-    const values = Object.values(data);
-    try {
-      const pool = poolGetter();
-      if (!pool) return res.status(503).json({ error: "Database not configured" });
-      const [result] = await pool.query(
-        `INSERT INTO receipts (${fields.join(", ")}) VALUES (${placeholders})`,
-        values
-      );
-      res.json({ id: (result as any).insertId, ...data });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Internal Server Error" });

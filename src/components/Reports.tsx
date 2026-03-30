@@ -56,13 +56,17 @@ export default function Reports({
     });
 
     const filteredReceipts = receipts.filter(r => {
-      const inRange = r.createdAt >= start && r.createdAt <= end;
-      return inRange;
+      const inRange = r.date >= start && r.date <= end;
+      const matchesStaff = selectedStaffId === 'all' || r.staffId === selectedStaffId;
+      const isApproved = r.status === 'approved';
+      return inRange && matchesStaff && isApproved;
     });
 
     const filteredVouchers = paymentVouchers.filter(v => {
-      const inRange = v.createdAt >= start && v.createdAt <= end;
-      return inRange;
+      const inRange = v.date >= start && v.date <= end;
+      const matchesStaff = selectedStaffId === 'all' || v.staffId === selectedStaffId;
+      const isApproved = v.status === 'approved';
+      return inRange && matchesStaff && isApproved;
     });
 
     const filteredSessions = teachingSessions.filter(s => {
@@ -71,7 +75,7 @@ export default function Reports({
     });
 
     const filteredAttendance = attendance.filter(a => {
-      const session = teachingSessions.find(s => s.id === a.sessionId);
+      const session = teachingSessions.find(s => String(s.id) === String(a.sessionId));
       if (!session) return false;
       return session.date >= start && session.date <= end;
     });
@@ -88,21 +92,23 @@ export default function Reports({
 
   // Financial Stats
   const financialStats = useMemo(() => {
-    const income = filteredData.receipts.reduce((sum, r) => sum + r.amount, 0);
-    const expense = filteredData.vouchers.reduce((sum, v) => sum + v.amount, 0);
+    const income = Math.round(filteredData.receipts.reduce((sum, r) => sum + Number(r.amount || 0), 0));
+    const expense = Math.round(filteredData.vouchers.reduce((sum, v) => sum + Number(v.amount || 0), 0));
     const profit = income - expense;
 
     // Income by Subject
     const incomeBySubjectMap: Record<string, number> = {};
     filteredData.receipts.forEach(r => {
-      incomeBySubjectMap[r.subject] = (incomeBySubjectMap[r.subject] || 0) + r.amount;
+      const amount = Number(r.amount || 0);
+      incomeBySubjectMap[r.subject] = (incomeBySubjectMap[r.subject] || 0) + amount;
     });
     const incomeBySubject = Object.entries(incomeBySubjectMap).map(([name, value]) => ({ name, value }));
 
     // Expense by Category
     const expenseByCategoryMap: Record<string, number> = {};
     filteredData.vouchers.forEach(v => {
-      expenseByCategoryMap[v.category] = (expenseByCategoryMap[v.category] || 0) + v.amount;
+      const amount = Number(v.amount || 0);
+      expenseByCategoryMap[v.category] = (expenseByCategoryMap[v.category] || 0) + amount;
     });
     const expenseByCategory = Object.entries(expenseByCategoryMap).map(([name, value]) => ({ name, value }));
 
@@ -122,12 +128,12 @@ export default function Reports({
       const dayEnd = endOfDay(day).getTime();
 
       const dayIncome = filteredData.receipts
-        .filter(r => r.createdAt >= dayStart && r.createdAt <= dayEnd)
-        .reduce((sum, r) => sum + r.amount, 0);
+        .filter(r => r.date >= dayStart && r.date <= dayEnd)
+        .reduce((sum, r) => sum + Number(r.amount || 0), 0);
       
       const dayExpense = filteredData.vouchers
-        .filter(v => v.createdAt >= dayStart && v.createdAt <= dayEnd)
-        .reduce((sum, v) => sum + v.amount, 0);
+        .filter(v => v.date >= dayStart && v.date <= dayEnd)
+        .reduce((sum, v) => sum + Number(v.amount || 0), 0);
 
       return { name: dateStr, thu: dayIncome, chi: dayExpense };
     });
@@ -152,15 +158,21 @@ export default function Reports({
   // Conversion Stats
   const conversionStats = useMemo(() => {
     const total = filteredData.customers.length;
-    const closed = filteredData.customers.filter(c => c.status === 'Đã chốt').length;
-    const rate = total > 0 ? (closed / total) * 100 : 0;
+    const closedStatuses = ['Đã chốt', 'Đã đóng tiền', 'Đã cọc'];
+    const closed = filteredData.customers.filter(c => closedStatuses.includes(c.status));
+    const closedCount = closed.length;
+    const rate = total > 0 ? (closedCount / total) * 100 : 0;
+    const totalValue = closed.reduce((sum, c) => {
+      const val = parseInt(String(c.closedAmount || '0').replace(/\D/g, '')) || 0;
+      return sum + val;
+    }, 0);
 
     const statusData = [
-      { name: 'Đã chốt', value: closed },
-      { name: 'Khác', value: total - closed }
+      { name: 'Đã chốt/Đóng tiền', value: closedCount },
+      { name: 'Khác', value: total - closedCount }
     ];
 
-    return { total, closed, rate, statusData };
+    return { total, closedCount, rate, statusData, totalValue };
   }, [filteredData.customers]);
 
   // Appointment Stats
@@ -182,9 +194,8 @@ export default function Reports({
     const teacherClassPairs = Array.from(new Set(filteredData.sessions.map(s => `${s.teacherId}|${s.classId}`).filter(p => !p.startsWith('|'))));
     const taClassPairs = Array.from(new Set(filteredData.sessions.map(s => `${s.taId}|${s.classId}`).filter(p => !p.startsWith('|'))));
 
-    const isSessionValid = (sessionId: string) => {
-      const sessionAttendance = filteredData.attendance.filter(a => a.sessionId === sessionId);
-      return sessionAttendance.some(a => a.status === 'có mặt' || a.status === 'muộn');
+    const isSessionMarked = (sessionId: string) => {
+      return filteredData.attendance.some(a => String(a.sessionId) === String(sessionId));
     };
 
     const teachers = teacherClassPairs.map(pair => {
@@ -195,11 +206,11 @@ export default function Reports({
       
       const completed = sessions.filter(s => {
         const isStatusCompleted = s.status === 'hoàn thành' || s.status === 'đang học' || s.status === 'kết thúc';
-        return isStatusCompleted && isSessionValid(s.id);
+        return isStatusCompleted && isSessionMarked(s.id);
       }).length;
 
       const cancelled = sessions.filter(s => s.status === 'hủy').length;
-      const pending = sessions.filter(s => s.status === 'chưa diễn ra' || (s.status === 'hoàn thành' && !isSessionValid(s.id))).length;
+      const pending = sessions.filter(s => s.status === 'chưa diễn ra' || (s.status === 'hoàn thành' && !isSessionMarked(s.id))).length;
       
       return { id: `${tid}-${cid}`, name, className, role: 'Giáo viên', completed, cancelled, pending, total: sessions.length };
     });
@@ -212,11 +223,11 @@ export default function Reports({
       
       const completed = sessions.filter(s => {
         const isStatusCompleted = s.status === 'hoàn thành' || s.status === 'đang học' || s.status === 'kết thúc';
-        return isStatusCompleted && isSessionValid(s.id);
+        return isStatusCompleted && isSessionMarked(s.id);
       }).length;
 
       const cancelled = sessions.filter(s => s.status === 'hủy').length;
-      const pending = sessions.filter(s => s.status === 'chưa diễn ra' || (s.status === 'hoàn thành' && !isSessionValid(s.id))).length;
+      const pending = sessions.filter(s => s.status === 'chưa diễn ra' || (s.status === 'hoàn thành' && !isSessionMarked(s.id))).length;
       
       return { id: `${taid}-${cid}`, name, className, role: 'Trợ giảng', completed, cancelled, pending, total: sessions.length };
     });
@@ -258,7 +269,7 @@ export default function Reports({
       else if (a.status === 'muộn') stats.late++;
       else if (a.status === 'phép') stats.excused++;
 
-      const session = teachingSessions.find(s => s.id === a.sessionId);
+      const session = teachingSessions.find(s => String(s.id) === String(a.sessionId));
       if (session && !stats.classes.includes(session.className)) {
         stats.classes.push(session.className);
       }
@@ -502,8 +513,8 @@ export default function Reports({
               <Target className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-sm text-gray-500 font-medium">Tỉ lệ chốt đơn</p>
-              <h4 className="text-2xl font-bold text-gray-900">{conversionStats.rate.toFixed(1)}%</h4>
+              <p className="text-sm text-gray-500 font-medium">Doanh số (Chốt)</p>
+              <h4 className="text-2xl font-bold text-green-600">{formatNumber(conversionStats.totalValue)}</h4>
             </div>
           </div>
         </div>
@@ -770,16 +781,44 @@ export default function Reports({
                 <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Nhân viên</th>
                 <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Khách mới</th>
                 <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Đã chốt</th>
-                <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Tỉ lệ chốt</th>
+                <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Doanh số</th>
+                <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Thực thu</th>
                 <th className="px-8 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Lịch hẹn</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {staff.map(s => {
-                const staffCustomers = customers.filter(c => c.ownerId === s.uid);
-                const staffClosed = staffCustomers.filter(c => c.status === 'Đã chốt').length;
-                const staffAppointments = appointments.filter(a => a.staffId === s.uid).length;
-                const staffRate = staffCustomers.length > 0 ? (staffClosed / staffCustomers.length) * 100 : 0;
+                const start = startOfDay(parseISO(dateRange.start)).getTime();
+                const end = endOfDay(parseISO(dateRange.end)).getTime();
+
+                // Leads created in period
+                const staffCustomers = customers.filter(c => c.ownerId === s.uid && c.createdAt >= start && c.createdAt <= end);
+                
+                // Revenue collected in period
+                const staffReceiptsInPeriod = receipts.filter(r => r.staffId === s.uid && r.date >= start && r.date <= end && r.status === 'approved');
+                const staffIncome = staffReceiptsInPeriod.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+                // Deals closed in period (based on first receipt date)
+                // A deal is "closed" in this period if the customer's FIRST receipt for a subject was in this period
+                const staffClosedDeals = receipts.filter(r => {
+                  if (r.staffId !== s.uid || r.status === 'rejected') return false;
+                  if (r.date < start || r.date > end) return false;
+                  
+                  // Check if this is the first receipt for this customer + subject
+                  const previousReceipts = receipts.filter(prev => 
+                    prev.customerId === r.customerId && 
+                    prev.subject === r.subject && 
+                    prev.date < r.date &&
+                    prev.status !== 'rejected'
+                  );
+                  return previousReceipts.length === 0;
+                });
+
+                const staffClosedCount = staffClosedDeals.length;
+                const staffSales = staffClosedDeals.reduce((sum, r) => sum + Number(r.totalAmount || 0), 0);
+                const staffRate = staffCustomers.length > 0 ? (staffClosedCount / staffCustomers.length) * 100 : 0;
+
+                const staffAppointments = appointments.filter(a => a.staffId === s.uid && a.time >= start && a.time <= end).length;
 
                 return (
                   <tr key={s.uid} className="hover:bg-gray-50/30 transition-colors">
@@ -792,12 +831,12 @@ export default function Reports({
                       </div>
                     </td>
                     <td className="px-8 py-4 text-center font-medium text-gray-600">{staffCustomers.length}</td>
-                    <td className="px-8 py-4 text-center font-medium text-green-600">{staffClosed}</td>
-                    <td className="px-8 py-4 text-center">
-                      <span className="px-3 py-1 bg-green-50 text-green-600 rounded-full text-xs font-bold">
-                        {staffRate.toFixed(1)}%
-                      </span>
+                    <td className="px-8 py-4 text-center font-medium text-green-600">
+                      {staffClosedCount}
+                      <span className="ml-1 text-[10px] text-gray-400">({staffRate.toFixed(0)}%)</span>
                     </td>
+                    <td className="px-8 py-4 text-center font-bold text-gray-900">{formatNumber(staffSales)}</td>
+                    <td className="px-8 py-4 text-center font-bold text-green-600">{formatNumber(staffIncome)}</td>
                     <td className="px-8 py-4 text-center font-medium text-blue-600">{staffAppointments}</td>
                   </tr>
                 );

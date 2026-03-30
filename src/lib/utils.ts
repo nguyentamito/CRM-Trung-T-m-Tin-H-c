@@ -39,7 +39,7 @@ export function formatNumber(value: string | number) {
   if (value === undefined || value === null || value === '') return '';
   const num = typeof value === 'string' ? parseFloat(value.replace(/[^0-9.-]+/g, "")) : value;
   if (isNaN(num)) return value.toString();
-  return new Intl.NumberFormat('vi-VN').format(num);
+  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(num);
 }
 
 export function safeGetISODate(date: Date | string | number) {

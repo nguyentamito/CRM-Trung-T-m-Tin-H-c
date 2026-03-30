@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import SearchableSelect from './SearchableSelect';
 
 interface ClassListProps {
   profile: UserProfile | null;
@@ -67,6 +68,7 @@ export default function ClassList({ profile }: ClassListProps) {
     roomId: '',
     roomName: '',
     roomLink: '',
+    zaloLink: '',
     status: 'đang học' as Class['status'],
   });
 
@@ -123,7 +125,13 @@ export default function ClassList({ profile }: ClassListProps) {
         roomsRes.json()
       ]);
 
-      setClasses(Array.isArray(classesData) ? classesData : []);
+      const parsedClasses = (Array.isArray(classesData) ? classesData : []).map((c: any) => ({
+        ...c,
+        sessions: (typeof c.sessions === 'string' && c.sessions.trim()) ? JSON.parse(c.sessions) : (Array.isArray(c.sessions) ? c.sessions : []),
+        studentIds: (typeof c.studentIds === 'string' && c.studentIds.trim()) ? JSON.parse(c.studentIds) : (Array.isArray(c.studentIds) ? c.studentIds : []),
+        studentNames: (typeof c.studentNames === 'string' && c.studentNames.trim()) ? JSON.parse(c.studentNames) : (Array.isArray(c.studentNames) ? c.studentNames : []),
+      }));
+      setClasses(parsedClasses);
       setTeachers(Array.isArray(teachersData) ? teachersData : []);
       setTAs(Array.isArray(tasData) ? tasData : []);
       setCustomers(Array.isArray(customersData) ? customersData : []);
@@ -142,6 +150,9 @@ export default function ClassList({ profile }: ClassListProps) {
 
   const checkConflict = (roomId: string, date: number, startTime: string, endTime: string, excludeSessionId?: string) => {
     if (!roomId) return null;
+    
+    const room = rooms.find(r => String(r.id) === String(roomId));
+    if (!room || room.type !== 'Phòng Online') return null;
     
     const conflict = teachingSessions.find(s => {
       if (s.id === excludeSessionId) return false;
@@ -162,12 +173,15 @@ export default function ClassList({ profile }: ClassListProps) {
     e.preventDefault();
     if (!isAdmin) return;
 
-    const selectedTeacher = teachers.find(t => t.id === formData.teacherId);
-    const selectedTA = tas.find(t => t.id === formData.taId);
-    const selectedRoom = rooms.find(r => r.id === formData.roomId);
+    const selectedTeacher = teachers.find(t => String(t.id) === String(formData.teacherId));
+    const selectedTA = tas.find(t => String(t.id) === String(formData.taId));
+    const selectedRoom = rooms.find(r => String(r.id) === String(formData.roomId));
 
     const data = {
       ...formData,
+      teacherId: formData.teacherId || null,
+      taId: formData.taId || null,
+      roomId: formData.roomId || null,
       teacherName: selectedTeacher?.name || '',
       taName: selectedTA?.name || '',
       roomName: selectedRoom?.name || '',
@@ -217,20 +231,20 @@ export default function ClassList({ profile }: ClassListProps) {
     e.preventDefault();
     if (!isAdmin) return;
 
-    const selectedClass = classes.find(c => c.id === sessionFormData.classId);
+    const selectedClass = classes.find(c => String(c.id) === String(sessionFormData.classId));
     if (!selectedClass) return;
 
-    const selectedRoom = rooms.find(r => r.id === sessionFormData.roomId);
+    const selectedRoom = rooms.find(r => String(r.id) === String(sessionFormData.roomId));
 
     const data = {
       classId: selectedClass.id,
       className: selectedClass.name,
       subject: selectedClass.subject,
-      teacherId: selectedClass.teacherId,
+      teacherId: selectedClass.teacherId || null,
       teacherName: selectedClass.teacherName,
-      taId: selectedClass.taId || '',
+      taId: selectedClass.taId || null,
       taName: selectedClass.taName || '',
-      roomId: selectedRoom?.id || '',
+      roomId: selectedRoom?.id || null,
       roomName: selectedRoom?.name || '',
       roomLink: selectedRoom?.location || '',
       date: new Date(sessionFormData.date).getTime(),
@@ -306,13 +320,14 @@ export default function ClassList({ profile }: ClassListProps) {
     if (!canMarkAttendance || !selectedSessionForAttendance || !profile) return;
 
     const existingRecord = attendanceRecords.find(
-      r => r.sessionId === selectedSessionForAttendance.id && r.studentId === studentId
+      r => String(r.sessionId) === String(selectedSessionForAttendance.id) && String(r.studentId) === String(studentId)
     );
 
     const data = {
       status,
       takenById: profile.uid,
       takenByName: profile.displayName || profile.email || 'Unknown',
+      date: selectedSessionForAttendance.date, // Add the session date to the attendance record
       updatedAt: Date.now()
     };
 
@@ -336,6 +351,17 @@ export default function ClassList({ profile }: ClassListProps) {
           })
         });
       }
+      
+      // Update session status to 'hoàn thành' if it's currently 'chưa diễn ra'
+      if (selectedSessionForAttendance.status === 'chưa diễn ra') {
+        await fetch(`/api/teaching_sessions/${selectedSessionForAttendance.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'hoàn thành' })
+        });
+        setSelectedSessionForAttendance({ ...selectedSessionForAttendance, status: 'hoàn thành' });
+      }
+
       fetchData();
     } catch (error) {
       console.error("Error updating attendance:", error);
@@ -356,6 +382,7 @@ export default function ClassList({ profile }: ClassListProps) {
       roomId: cls.roomId || '',
       roomName: cls.roomName || '',
       roomLink: cls.roomLink || '',
+      zaloLink: cls.zaloLink || '',
       schedule: cls.schedule || '',
       sessions: cls.sessions || [],
       startDate: format(new Date(cls.startDate), 'yyyy-MM-dd'),
@@ -379,6 +406,7 @@ export default function ClassList({ profile }: ClassListProps) {
       roomId: '',
       roomName: '',
       roomLink: '',
+      zaloLink: '',
       schedule: '',
       sessions: [],
       startDate: format(new Date(), 'yyyy-MM-dd'),
@@ -388,17 +416,17 @@ export default function ClassList({ profile }: ClassListProps) {
 
   const toggleStudent = (customer: Customer) => {
     setFormData(prev => {
-      const isSelected = prev.studentIds.includes(customer.id);
+      const isSelected = prev.studentIds.some(id => String(id) === String(customer.id));
       if (isSelected) {
         return {
           ...prev,
-          studentIds: prev.studentIds.filter(id => id !== customer.id),
+          studentIds: prev.studentIds.filter(id => String(id) !== String(customer.id)),
           studentNames: prev.studentNames.filter(name => name !== customer.name)
         };
       } else {
         return {
           ...prev,
-          studentIds: [...prev.studentIds, customer.id],
+          studentIds: [...prev.studentIds, String(customer.id)],
           studentNames: [...prev.studentNames, customer.name]
         };
       }
@@ -428,7 +456,7 @@ export default function ClassList({ profile }: ClassListProps) {
 
   const handleUpdateStudents = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin || !selectedClassForStudents) return;
+    if ((!isAdmin && !isStaff) || !selectedClassForStudents) return;
 
     try {
       await fetch(`/api/classes/${selectedClassForStudents.id}`, {
@@ -502,33 +530,29 @@ export default function ClassList({ profile }: ClassListProps) {
             <div className="space-y-6">
               {studentModalTab === 'add' ? (
                 <div className="space-y-4">
-                  <div className="relative max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                    <input
-                      type="text"
-                      placeholder="Tìm kiếm học viên để thêm vào lớp..."
-                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                      onChange={(e) => {
-                        const term = e.target.value.toLowerCase();
-                        const labels = e.currentTarget.parentElement?.nextElementSibling?.querySelectorAll('label');
-                        labels?.forEach(label => {
-                          const text = label.textContent?.toLowerCase() || '';
-                          (label as HTMLElement).style.display = text.includes(term) ? 'flex' : 'none';
-                        });
+                  <div className="max-w-md">
+                    <SearchableSelect
+                      options={customers.map(customer => ({
+                        id: String(customer.id),
+                        label: customer.name,
+                        sublabel: customer.phone,
+                        disabled: formData.studentIds.some(id => String(id) === String(customer.id))
+                      }))}
+                      value=""
+                      onChange={(value) => {
+                        const customer = customers.find(c => String(c.id) === String(value));
+                        if (customer) toggleStudent(customer);
                       }}
+                      placeholder="Tìm kiếm học viên để thêm vào lớp..."
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto p-1">
                     {customers.length > 0 ? (
-                      customers.map(customer => (
-                        <label key={customer.id} className={`flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition-all ${
-                          formData.studentIds.includes(customer.id) 
-                            ? 'border-[#2D5A4C] bg-[#2D5A4C]/5 ring-1 ring-[#2D5A4C]' 
-                            : 'border-gray-100 hover:border-gray-300 hover:bg-gray-50'
-                        }`}>
+                      customers.filter(c => formData.studentIds.some(id => String(id) === String(c.id))).map(customer => (
+                        <label key={customer.id} className="flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition-all border-[#2D5A4C] bg-[#2D5A4C]/5 ring-1 ring-[#2D5A4C]">
                           <input
                             type="checkbox"
-                            checked={formData.studentIds.includes(customer.id)}
+                            checked={true}
                             onChange={() => toggleStudent(customer)}
                             className="w-5 h-5 rounded border-gray-300 text-[#2D5A4C] focus:ring-[#2D5A4C]"
                           />
@@ -542,6 +566,11 @@ export default function ClassList({ profile }: ClassListProps) {
                       <div className="col-span-full py-12 text-center">
                         <Users className="w-12 h-12 text-gray-200 mx-auto mb-2" />
                         <p className="text-gray-400 italic">Chưa có dữ liệu khách hàng</p>
+                      </div>
+                    )}
+                    {formData.studentIds.length === 0 && (
+                      <div className="col-span-full py-12 text-center border-2 border-dashed border-gray-100 rounded-2xl">
+                        <p className="text-gray-400 italic">Chọn học viên từ ô tìm kiếm phía trên để thêm vào lớp.</p>
                       </div>
                     )}
                   </div>
@@ -560,7 +589,7 @@ export default function ClassList({ profile }: ClassListProps) {
                       <tbody className="divide-y divide-gray-50">
                         {formData.studentIds.map((id, index) => {
                           const name = formData.studentNames[index];
-                          const customer = customers.find(c => c.id === id);
+                          const customer = customers.find(c => String(c.id) === String(id));
                           return (
                             <tr key={id} className="hover:bg-gray-50/50 transition-colors">
                               <td className="px-6 py-4">
@@ -706,6 +735,7 @@ export default function ClassList({ profile }: ClassListProps) {
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Lớp học</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Học viên</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Môn học & Giáo viên</th>
+                  <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Zalo</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Thao tác</th>
                 </tr>
@@ -751,6 +781,20 @@ export default function ClassList({ profile }: ClassListProps) {
                           {cls.teacherName}
                         </div>
                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      {cls.zaloLink ? (
+                        <a 
+                          href={cls.zaloLink} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 text-xs font-bold flex items-center gap-1"
+                        >
+                          Link nhóm
+                        </a>
+                      ) : (
+                        <span className="text-gray-400 text-xs italic">Chưa có</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-block px-2 py-1 rounded text-[10px] uppercase font-bold ${
@@ -968,9 +1012,9 @@ export default function ClassList({ profile }: ClassListProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {classes.find(c => c.id === selectedSessionForAttendance.classId)?.studentIds.map((studentId, index) => {
-                    const studentName = classes.find(c => c.id === selectedSessionForAttendance.classId)?.studentNames[index] || '';
-                    const record = attendanceRecords.find(r => r.sessionId === selectedSessionForAttendance.id && r.studentId === studentId);
+                  {classes.find(c => String(c.id) === String(selectedSessionForAttendance.classId))?.studentIds.map((studentId, index) => {
+                    const studentName = classes.find(c => String(c.id) === String(selectedSessionForAttendance.classId))?.studentNames[index] || '';
+                    const record = attendanceRecords.find(r => String(r.sessionId) === String(selectedSessionForAttendance.id) && String(r.studentId) === String(studentId));
                     
                     return (
                       <tr key={studentId} className="hover:bg-gray-50/50">
@@ -1007,7 +1051,7 @@ export default function ClassList({ profile }: ClassListProps) {
                   })}
                 </tbody>
               </table>
-              {(!classes.find(c => c.id === selectedSessionForAttendance.classId)?.studentIds.length) && (
+              {(!classes.find(c => String(c.id) === String(selectedSessionForAttendance.classId))?.studentIds.length) && (
                 <div className="text-center py-10 text-gray-500 italic">
                   Lớp học này chưa có học viên.
                 </div>
@@ -1050,22 +1094,21 @@ export default function ClassList({ profile }: ClassListProps) {
             <form onSubmit={handleSessionSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Lớp học *</label>
-                <select
-                  required
-                  value={sessionFormData.classId}
-                  onChange={(e) => {
+                <SearchableSelect
+                  options={classes.map(c => ({
+                    id: String(c.id),
+                    label: `${c.name} (${c.subject})`,
+                    sublabel: c.teacherName
+                  }))}
+                  value={String(sessionFormData.classId)}
+                  onChange={(value) => {
                     setSessionFormData({ 
                       ...sessionFormData, 
-                      classId: e.target.value,
+                      classId: String(value),
                     });
                   }}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                >
-                  <option value="">Chọn lớp học</option>
-                  {classes.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.subject})</option>
-                  ))}
-                </select>
+                  placeholder="Chọn lớp học"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ngày học *</label>
@@ -1116,22 +1159,21 @@ export default function ClassList({ profile }: ClassListProps) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phòng học *</label>
-                <select
-                  required
-                  value={sessionFormData.roomId}
-                  onChange={(e) => setSessionFormData({ ...sessionFormData, roomId: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                >
-                  <option value="">Chọn phòng học</option>
-                  {rooms.map(r => (
-                    <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                  options={rooms.map(r => ({
+                    id: String(r.id),
+                    label: r.name,
+                    sublabel: r.type
+                  }))}
+                  value={String(sessionFormData.roomId)}
+                  onChange={(value) => setSessionFormData({ ...sessionFormData, roomId: String(value) })}
+                  placeholder="Chọn phòng học"
+                />
               </div>
               {sessionFormData.roomId && (
                 <div className="text-xs text-gray-500 flex items-center gap-1">
                   <MapPin className="w-3 h-3" />
-                  {rooms.find(r => r.id === sessionFormData.roomId)?.location}
+                  {rooms.find(r => String(r.id) === String(sessionFormData.roomId))?.location}
                 </div>
               )}
               {(() => {
@@ -1211,17 +1253,15 @@ export default function ClassList({ profile }: ClassListProps) {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Môn học *</label>
-                    <select
-                      required
+                    <SearchableSelect
+                      options={subjects.map(s => ({
+                        id: s.name,
+                        label: s.name
+                      }))}
                       value={formData.subject}
-                      onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                    >
-                      <option value="">Chọn môn học</option>
-                      {subjects.map(s => (
-                        <option key={s.id} value={s.name}>{s.name}</option>
-                      ))}
-                    </select>
+                      onChange={(value) => setFormData({ ...formData, subject: String(value) })}
+                      placeholder="Chọn môn học"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Trạng thái *</label>
@@ -1241,30 +1281,29 @@ export default function ClassList({ profile }: ClassListProps) {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Giáo viên *</label>
-                    <select
-                      required
-                      value={formData.teacherId}
-                      onChange={(e) => setFormData({ ...formData, teacherId: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                    >
-                      <option value="">Chọn giáo viên</option>
-                      {teachers.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                    <SearchableSelect
+                      options={teachers.map(t => ({
+                        id: String(t.id),
+                        label: t.name,
+                        sublabel: t.phone
+                      }))}
+                      value={String(formData.teacherId)}
+                      onChange={(value) => setFormData({ ...formData, teacherId: String(value) })}
+                      placeholder="Chọn giáo viên"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Trợ giảng</label>
-                    <select
-                      value={formData.taId}
-                      onChange={(e) => setFormData({ ...formData, taId: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                    >
-                      <option value="">Chọn trợ giảng</option>
-                      {tas.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                    <SearchableSelect
+                      options={tas.map(t => ({
+                        id: String(t.id),
+                        label: t.name,
+                        sublabel: t.phone
+                      }))}
+                      value={String(formData.taId)}
+                      onChange={(value) => setFormData({ ...formData, taId: String(value) })}
+                      placeholder="Chọn trợ giảng"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Lịch học</label>
@@ -1286,17 +1325,27 @@ export default function ClassList({ profile }: ClassListProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Phòng học mặc định</label>
-                    <select
-                      value={formData.roomId}
-                      onChange={(e) => setFormData({ ...formData, roomId: e.target.value })}
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Link nhóm Zalo</label>
+                    <input
+                      type="text"
+                      value={formData.zaloLink}
+                      onChange={(e) => setFormData({ ...formData, zaloLink: e.target.value })}
+                      placeholder="https://zalo.me/g/..."
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                    >
-                      <option value="">Chọn phòng học</option>
-                      {rooms.map(r => (
-                        <option key={r.id} value={r.id}>{r.name} ({r.type})</option>
-                      ))}
-                    </select>
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phòng học mặc định</label>
+                    <SearchableSelect
+                      options={rooms.map(r => ({
+                        id: String(r.id),
+                        label: r.name,
+                        sublabel: r.type
+                      }))}
+                      value={String(formData.roomId)}
+                      onChange={(value) => setFormData({ ...formData, roomId: String(value) })}
+                      placeholder="Chọn phòng học"
+                    />
                   </div>
                 </div>
 

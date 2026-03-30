@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc,
-  deleteDoc,
-  orderBy,
-  where,
-  doc,
-  getDoc
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Receipt, Customer, UserProfile, ReceiptType, PaymentMethod, CenterInfo } from '../types';
+import SearchableSelect from './SearchableSelect';
 import { 
   Plus, 
   Search, 
@@ -77,40 +65,57 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   useEffect(() => {
     if (!profile) return;
 
-    const fetchReceipts = async () => {
+    const fetchData = async () => {
       try {
-        const response = await fetch('/api/receipts');
-        if (response.ok) {
-          const data = await response.json();
+        const [receiptsRes, customersRes, settingsRes] = await Promise.all([
+          fetch('/api/receipts'),
+          fetch('/api/customers'),
+          fetch('/api/settings')
+        ]);
+
+        if (receiptsRes.ok) {
+          const data = await receiptsRes.json();
           setReceipts(Array.isArray(data) ? data : []);
-          setLoading(false);
         }
+
+        if (customersRes.ok) {
+          const data = await customersRes.json();
+          // Show all customers so the user can select anyone
+          setCustomers(Array.isArray(data) ? data : []);
+        }
+
+        if (settingsRes.ok) {
+          const data = await settingsRes.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setCenterInfo(data[0]);
+          }
+        }
+
+        setLoading(false);
       } catch (error) {
-        console.error('Error fetching receipts:', error);
+        console.error('Error fetching data:', error);
+        setLoading(false);
       }
     };
-    fetchReceipts();
-
-    // Note: In a real MySQL app, you'd also fetch customers and center info via API
-    // For this example, we'll keep the Firestore listeners for those if they are still needed
-    // but ideally they should also move to MySQL.
+    fetchData();
   }, [profile]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || (!isAdmin && !isStaff)) return;
 
-    const customer = customers.find(c => c.id === formData.customerId);
+    const customer = customers.find(c => String(c.id) === String(formData.customerId));
     if (!customer) return;
 
-    const totalAmount = parseInt(customer.closedAmount.replace(/\D/g, '')) || 0;
+    const closedAmountStr = customer.closedAmount ? customer.closedAmount.toString() : '0';
+    const totalAmount = parseInt(closedAmountStr.replace(/\D/g, '')) || 0;
     const totalPaid = receipts
-      .filter(r => r.customerId === customer.id && r.id !== selectedReceipt?.id)
-      .reduce((sum, r) => sum + r.amount, 0);
+      .filter(r => r.customerId === customer.id && r.id !== selectedReceipt?.id && r.status === 'approved')
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0);
     
-    const remainingAmount = totalAmount - totalPaid - formData.amount;
+    const remainingAmount = totalAmount - totalPaid - Number(formData.amount);
 
-    const data = {
+    const data: any = {
       customerId: customer.id,
       customerName: customer.name,
       customerPhone: customer.phone || '',
@@ -122,12 +127,16 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
       paymentMethod: formData.paymentMethod,
       note: formData.note || '',
       attachmentUrl: formData.attachmentUrl || '',
-      staffId: profile.uid,
-      staffName: profile.displayName || profile.email || 'Unknown',
-      date: new Date(formData.date).getTime(),
+      date: parseISO(formData.date).getTime(),
       status: isAdmin ? 'approved' : 'pending',
       updatedAt: Date.now()
     };
+
+    if (!selectedReceipt) {
+      data.staffId = profile.uid;
+      data.staffName = profile.displayName || profile.email || 'Unknown';
+      data.createdAt = Date.now();
+    }
 
     try {
       if (selectedReceipt) {
@@ -140,6 +149,20 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
         if (response.ok) {
           const updated = await response.json();
           setReceipts(receipts.map(r => r.id === selectedReceipt.id ? { ...r, ...updated } : r));
+          setIsModalOpen(false);
+          setSelectedReceipt(null);
+          setFormData({
+            customerId: '',
+            amount: 0,
+            type: 'cọc',
+            paymentMethod: 'tiền mặt',
+            note: '',
+            date: format(new Date(), 'yyyy-MM-dd'),
+            attachmentUrl: ''
+          });
+        } else {
+          const errorData = await response.json();
+          alert(`Lỗi khi cập nhật phiếu thu: ${errorData.error || response.statusText}`);
         }
       } else {
         const receiptNumber = `PT-${format(new Date(data.date), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -151,19 +174,21 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
         if (response.ok) {
           const newReceipt = await response.json();
           setReceipts([newReceipt, ...receipts]);
+          setIsModalOpen(false);
+          setFormData({
+            customerId: '',
+            amount: 0,
+            type: 'cọc',
+            paymentMethod: 'tiền mặt',
+            note: '',
+            date: format(new Date(), 'yyyy-MM-dd'),
+            attachmentUrl: ''
+          });
+        } else {
+          const errorData = await response.json();
+          alert(`Lỗi khi tạo phiếu thu: ${errorData.error || response.statusText}`);
         }
       }
-      setIsModalOpen(false);
-      setSelectedReceipt(null);
-      setFormData({
-        customerId: '',
-        amount: 0,
-        type: 'đóng 100%',
-        paymentMethod: 'chuyển khoản',
-        note: '',
-        date: format(new Date(), 'yyyy-MM-dd'),
-        attachmentUrl: ''
-      });
     } catch (error) {
       console.error('Error saving receipt:', error);
     }
@@ -183,14 +208,16 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     return matchesSearch && matchesType && matchesDate;
   });
 
-  const totalCollected = filteredReceipts.reduce((sum, r) => sum + r.amount, 0);
+  const totalCollected = filteredReceipts
+    .filter(r => r.status === 'approved')
+    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
   const openEditModal = (receipt: Receipt) => {
     if (!isAdmin) return;
     setSelectedReceipt(receipt);
     setFormData({
       customerId: receipt.customerId,
-      amount: receipt.amount,
+      amount: Number(receipt.amount),
       type: receipt.type,
       paymentMethod: receipt.paymentMethod,
       note: receipt.note || '',
@@ -203,11 +230,16 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   const handleDelete = async () => {
     if (!receiptToDelete) return;
     try {
-      await deleteDoc(doc(db, 'receipts', receiptToDelete.id));
-      setIsDeleteModalOpen(false);
-      setReceiptToDelete(null);
+      const response = await fetch(`/api/receipts/${receiptToDelete.id}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        setReceipts(receipts.filter(r => r.id !== receiptToDelete.id));
+        setIsDeleteModalOpen(false);
+        setReceiptToDelete(null);
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'receipts');
+      console.error('Error deleting receipt:', error);
     }
   };
 
@@ -421,9 +453,16 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                             <button 
                               onClick={async () => {
                                 try {
-                                  await updateDoc(doc(db, 'receipts', receipt.id), { status: 'approved', updatedAt: Date.now() });
+                                  const response = await fetch(`/api/receipts/${receipt.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'approved', updatedAt: Date.now() })
+                                  });
+                                  if (response.ok) {
+                                    setReceipts(receipts.map(r => r.id === receipt.id ? { ...r, status: 'approved' } : r));
+                                  }
                                 } catch (error) {
-                                  handleFirestoreError(error, OperationType.UPDATE, 'receipts');
+                                  console.error('Error approving receipt:', error);
                                 }
                               }}
                               className="p-2 text-gray-400 hover:text-green-600 transition-colors" 
@@ -494,14 +533,14 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Khách hàng *</label>
-                <select
-                  required
+                <SearchableSelect
                   disabled={!!selectedReceipt}
                   value={formData.customerId}
-                  onChange={(e) => {
-                    const customer = customers.find(c => c.id === e.target.value);
+                  onChange={(val) => {
+                    const customer = customers.find(c => String(c.id) === String(val));
                     if (customer) {
-                      const totalAmount = parseInt(customer.closedAmount.replace(/\D/g, '')) || 0;
+                      const closedAmountStr = customer.closedAmount ? customer.closedAmount.toString() : '0';
+                      const totalAmount = parseInt(closedAmountStr.replace(/\D/g, '')) || 0;
                       const totalPaid = receipts
                         .filter(r => r.customerId === customer.id)
                         .reduce((sum, r) => sum + r.amount, 0);
@@ -509,20 +548,20 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                       const remaining = totalAmount - totalPaid;
                       setFormData({ 
                         ...formData, 
-                        customerId: e.target.value, 
+                        customerId: String(val), 
                         amount: remaining > 0 ? remaining : 0 
                       });
                     } else {
-                      setFormData({ ...formData, customerId: e.target.value });
+                      setFormData({ ...formData, customerId: String(val) });
                     }
                   }}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
-                >
-                  <option value="">Chọn khách hàng</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} - {c.phone} ({formatNumber(c.closedAmount)})</option>
-                  ))}
-                </select>
+                  options={customers.map(c => ({
+                    id: c.id,
+                    label: c.name,
+                    subLabel: `${c.phone} (${formatNumber(c.closedAmount)} VNĐ)`
+                  }))}
+                  placeholder="Chọn khách hàng..."
+                />
               </div>
 
               {formData.customerId && (
@@ -530,12 +569,15 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Môn học</p>
-                      <p className="font-bold text-[#2D5A4C]">{customers.find(c => c.id === formData.customerId)?.subject}</p>
+                      <p className="font-bold text-[#2D5A4C]">{customers.find(c => String(c.id) === String(formData.customerId))?.subject}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Đã thu trước đó</p>
                       <p className="font-bold text-blue-600">
-                        {formatNumber(receipts.filter(r => r.customerId === formData.customerId).reduce((sum, r) => sum + r.amount, 0))} VNĐ
+                        {formatNumber(receipts
+                          .filter(r => r.customerId === formData.customerId && r.status === 'approved')
+                          .reduce((sum, r) => sum + Number(r.amount || 0), 0)
+                        )} VNĐ
                       </p>
                     </div>
                   </div>
@@ -556,10 +598,14 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền thu (VNĐ) *</label>
                   <input
-                    type="number"
+                    type="text"
                     required
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: parseInt(e.target.value) || 0 })}
+                    value={formatNumber(formData.amount)}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setFormData({ ...formData, amount: parseInt(val) || 0 });
+                    }}
+                    placeholder="0"
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                   />
                 </div>

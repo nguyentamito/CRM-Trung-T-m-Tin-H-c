@@ -105,7 +105,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
     e.preventDefault();
     if (!profile || (!isAdmin && !isStaff)) return;
 
-    const data = {
+    const data: any = {
       category: formData.category,
       recipientName: formData.recipientName,
       recipientId: formData.recipientId || '',
@@ -113,12 +113,16 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
       description: formData.description,
       paymentMethod: formData.paymentMethod,
       attachmentUrl: formData.attachmentUrl || '',
-      staffId: profile.uid,
-      staffName: profile.displayName || profile.email || 'Unknown',
-      date: new Date(formData.date).getTime(),
+      date: parseISO(formData.date).getTime(),
       status: isAdmin ? 'approved' : 'pending',
       updatedAt: Date.now()
     };
+
+    if (!selectedVoucher) {
+      data.staffId = profile.uid;
+      data.staffName = profile.displayName || profile.email || 'Unknown';
+      data.createdAt = Date.now();
+    }
 
     try {
       if (selectedVoucher) {
@@ -135,11 +139,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
         await fetch('/api/payment_vouchers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            ...data, 
-            voucherNumber,
-            createdAt: Date.now() 
-          })
+          body: JSON.stringify(data)
         });
       }
       fetchData();
@@ -556,7 +556,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
                     required
                     value={formData.recipientId}
                     onChange={(e) => {
-                      const teacher = teachers.find(t => t.id === e.target.value);
+                      const teacher = teachers.find(t => String(t.id) === String(e.target.value));
                       setFormData({ 
                         ...formData, 
                         recipientId: e.target.value, 
@@ -575,7 +575,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
                     required
                     value={formData.recipientId}
                     onChange={(e) => {
-                      const ta = tas.find(t => t.id === e.target.value);
+                      const ta = tas.find(t => String(t.id) === String(e.target.value));
                       setFormData({ 
                         ...formData, 
                         recipientId: e.target.value, 
@@ -604,11 +604,15 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền chi (VNĐ) *</label>
                 <input
-                  type="number"
+                  type="text"
                   required
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: parseInt(e.target.value) || 0 })}
+                  value={formatNumber(formData.amount)}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setFormData({ ...formData, amount: parseInt(val) || 0 });
+                  }}
                   className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600"
+                  placeholder="0"
                 />
               </div>
 

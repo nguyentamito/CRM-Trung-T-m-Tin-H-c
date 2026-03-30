@@ -29,6 +29,10 @@ export default function TeacherList({ profile }: TeacherListProps) {
     phone: '',
     email: '',
     subjects: [] as string[],
+    dob: '',
+    qualification: '',
+    pedagogical: false,
+    address: '',
   });
 
   const fetchData = async () => {
@@ -41,7 +45,17 @@ export default function TeacherList({ profile }: TeacherListProps) {
         teachersRes.json(),
         subjectsRes.json()
       ]);
-      setTeachers(Array.isArray(teachersData) ? teachersData : []);
+      const parsedTeachers = (Array.isArray(teachersData) ? teachersData : []).map((t: any) => {
+        let parsedSubjects = [];
+        try {
+          parsedSubjects = typeof t.subjects === 'string' ? JSON.parse(t.subjects) : (t.subjects || []);
+        } catch (e) {
+          console.error('Error parsing subjects for teacher:', t.id, e);
+          parsedSubjects = [];
+        }
+        return { ...t, subjects: Array.isArray(parsedSubjects) ? parsedSubjects : [] };
+      });
+      setTeachers(parsedTeachers);
       setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
     } catch (error) {
       console.error('Error fetching teacher data:', error);
@@ -102,6 +116,10 @@ export default function TeacherList({ profile }: TeacherListProps) {
       phone: teacher.phone,
       email: teacher.email,
       subjects: teacher.subjects || [],
+      dob: teacher.dob || '',
+      qualification: teacher.qualification || '',
+      pedagogical: !!teacher.pedagogical,
+      address: teacher.address || '',
     });
     setIsModalOpen(true);
   };
@@ -114,6 +132,10 @@ export default function TeacherList({ profile }: TeacherListProps) {
       phone: '',
       email: '',
       subjects: [],
+      dob: '',
+      qualification: '',
+      pedagogical: false,
+      address: '',
     });
   };
 
@@ -158,59 +180,86 @@ export default function TeacherList({ profile }: TeacherListProps) {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredTeachers.map((teacher) => (
-          <div key={teacher.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
-            <div className="p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-[#2D5A4C]/10 rounded-full flex items-center justify-center text-[#2D5A4C]">
-                    <User className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-900">{teacher.name}</h3>
-                    <p className="text-sm text-gray-500">Giáo viên</p>
-                  </div>
-                </div>
-                {isAdmin && (
-                  <div className="flex gap-2">
-                    <button onClick={() => openEditModal(teacher)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleDelete(teacher.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <Phone className="w-4 h-4" />
-                  {teacher.phone}
-                </div>
-                <div className="flex items-center gap-3 text-sm text-gray-600">
-                  <Mail className="w-4 h-4" />
-                  {teacher.email}
-                </div>
-                <div className="flex items-start gap-3 text-sm text-gray-600">
-                  <BookOpen className="w-4 h-4 mt-1" />
-                  <div className="flex flex-wrap gap-1">
-                    {teacher.subjects?.length > 0 ? (
-                      teacher.subjects.map(s => (
-                        <span key={s} className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">
-                          {s}
-                        </span>
-                      ))
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">Họ tên</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">Ngày sinh</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">Liên hệ</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">Trình độ</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">NV Sư phạm</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">Địa chỉ</th>
+                <th className="px-6 py-4 text-sm font-semibold text-gray-900">Môn học</th>
+                {isAdmin && <th className="px-6 py-4 text-sm font-semibold text-gray-900 text-right">Thao tác</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filteredTeachers.map((teacher) => (
+                <tr key={teacher.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-[#2D5A4C]/10 rounded-full flex items-center justify-center text-[#2D5A4C]">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <span className="font-medium text-gray-900">{teacher.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {teacher.dob ? new Date(teacher.dob).toLocaleDateString('vi-VN') : '-'}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <Phone className="w-3 h-3" />
+                        {teacher.phone}
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <Mail className="w-3 h-3" />
+                        {teacher.email}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">{teacher.qualification || '-'}</td>
+                  <td className="px-6 py-4">
+                    {teacher.pedagogical ? (
+                      <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">Có</span>
                     ) : (
-                      <span className="text-gray-400 italic">Chưa gán môn học</span>
+                      <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">Không</span>
                     )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">{teacher.address || '-'}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-wrap gap-1">
+                      {Array.isArray(teacher.subjects) && teacher.subjects.length > 0 ? (
+                        teacher.subjects.map(s => (
+                          <span key={s} className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">
+                            {s}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-gray-400 italic text-xs">Chưa gán</span>
+                      )}
+                    </div>
+                  </td>
+                  {isAdmin && (
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => openEditModal(teacher)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDelete(teacher.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {isModalOpen && (
@@ -224,7 +273,7 @@ export default function TeacherList({ profile }: TeacherListProps) {
                 <X className="w-6 h-6" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Họ tên *</label>
                 <input
@@ -237,6 +286,15 @@ export default function TeacherList({ profile }: TeacherListProps) {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Ngày sinh</label>
+                  <input
+                    type="date"
+                    value={formData.dob}
+                    onChange={(e) => setFormData({ ...formData, dob: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Số điện thoại *</label>
                   <input
                     required
@@ -246,6 +304,8 @@ export default function TeacherList({ profile }: TeacherListProps) {
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                   />
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
@@ -255,6 +315,35 @@ export default function TeacherList({ profile }: TeacherListProps) {
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Trình độ</label>
+                  <input
+                    type="text"
+                    placeholder="VD: Thạc sĩ, Cử nhân..."
+                    value={formData.qualification}
+                    onChange={(e) => setFormData({ ...formData, qualification: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ</label>
+                <input
+                  type="text"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="pedagogical"
+                  checked={formData.pedagogical}
+                  onChange={(e) => setFormData({ ...formData, pedagogical: e.target.checked })}
+                  className="rounded border-gray-300 text-[#2D5A4C] focus:ring-[#2D5A4C]"
+                />
+                <label htmlFor="pedagogical" className="text-sm font-medium text-gray-700">Có nghiệp vụ sư phạm</label>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Môn học phụ trách</label>

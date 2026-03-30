@@ -55,8 +55,15 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
         attendanceRes.json()
       ]);
 
+      const parsedClasses = (Array.isArray(classesData) ? classesData : []).map((c: any) => ({
+        ...c,
+        studentIds: (typeof c.studentIds === 'string' && c.studentIds.trim()) ? JSON.parse(c.studentIds) : (Array.isArray(c.studentIds) ? c.studentIds : []),
+        studentNames: (typeof c.studentNames === 'string' && c.studentNames.trim()) ? JSON.parse(c.studentNames) : (Array.isArray(c.studentNames) ? c.studentNames : []),
+        sessions: (typeof c.sessions === 'string' && c.sessions.trim()) ? JSON.parse(c.sessions) : (Array.isArray(c.sessions) ? c.sessions : []),
+      }));
+
       setSessions(Array.isArray(sessionsData) ? sessionsData : []);
-      setClasses(Array.isArray(classesData) ? classesData : []);
+      setClasses(parsedClasses);
       setAttendanceRecords(Array.isArray(attendanceData) ? attendanceData : []);
       setLoading(false);
     } catch (error) {
@@ -73,13 +80,14 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
     if (!selectedSession || !profile) return;
 
     const existingRecord = attendanceRecords.find(
-      r => r.sessionId === selectedSession.id && r.studentId === studentId
+      r => String(r.sessionId) === String(selectedSession.id) && String(r.studentId) === String(studentId)
     );
 
     const data = {
       status,
       takenById: profile.uid,
       takenByName: profile.displayName || profile.email || 'Unknown',
+      date: selectedSession.date, // Add the session date to the attendance record
       updatedAt: Date.now()
     };
 
@@ -103,6 +111,17 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
           })
         });
       }
+      
+      // Update session status to 'hoàn thành' if it's currently 'chưa diễn ra'
+      if (selectedSession.status === 'chưa diễn ra') {
+        await fetch(`/api/teaching_sessions/${selectedSession.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'hoàn thành' })
+        });
+        setSelectedSession({ ...selectedSession, status: 'hoàn thành' });
+      }
+
       fetchData();
     } catch (error) {
       console.error("Error updating attendance:", error);
@@ -115,16 +134,18 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
   );
 
   const getAttendanceStats = (sessionId: string, classId: string) => {
-    const classData = classes.find(c => c.id === classId);
-    if (!classData) return { total: 0, present: 0 };
+    const classData = classes.find(c => String(c.id) === String(classId));
+    if (!classData || !classData.studentIds) return { total: 0, present: 0, completed: false };
 
-    const records = attendanceRecords.filter(r => r.sessionId === sessionId);
+    const records = attendanceRecords.filter(r => String(r.sessionId) === String(sessionId));
     const present = records.filter(r => r.status === 'có mặt').length;
     
+    const totalStudents = classData.studentIds.length;
+    
     return {
-      total: classData.studentIds.length,
+      total: totalStudents,
       present: present,
-      completed: records.length === classData.studentIds.length && classData.studentIds.length > 0
+      completed: records.length === totalStudents && totalStudents > 0
     };
   };
 
@@ -363,9 +384,9 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {classes.find(c => c.id === selectedSession.classId)?.studentIds.map((studentId, index) => {
-                    const studentName = classes.find(c => c.id === selectedSession.classId)?.studentNames[index] || '';
-                    const record = attendanceRecords.find(r => r.sessionId === selectedSession.id && r.studentId === studentId);
+                  {(classes.find(c => String(c.id) === String(selectedSession.classId))?.studentIds || []).map((studentId, index) => {
+                    const studentName = classes.find(c => String(c.id) === String(selectedSession.classId))?.studentNames?.[index] || '';
+                    const record = attendanceRecords.find(r => String(r.sessionId) === String(selectedSession.id) && String(r.studentId) === String(studentId));
                     
                     return (
                       <tr key={studentId} className="hover:bg-gray-50/50">
@@ -402,7 +423,7 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
                   })}
                 </tbody>
               </table>
-              {(!classes.find(c => c.id === selectedSession.classId)?.studentIds.length) && (
+              {((classes.find(c => String(c.id) === String(selectedSession.classId))?.studentIds?.length || 0) === 0) && (
                 <div className="text-center py-10 text-gray-500 italic">
                   Lớp học này chưa có học viên.
                 </div>

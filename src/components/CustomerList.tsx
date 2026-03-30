@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Search, 
   Plus, 
@@ -119,61 +119,60 @@ export default function CustomerList({ profile }: CustomerListProps) {
     appointmentContent: ''
   });
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!profile) return;
+    try {
+      const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
+      
+      const [customersRes, interactionsRes, subjectsRes, receiptsRes] = await Promise.all([
+        fetch(`/api/customers${ownerIdParam}`),
+        fetch(`/api/interactions`),
+        fetch(`/api/subjects`),
+        fetch(`/api/receipts`)
+      ]);
 
-    const fetchData = async () => {
-      try {
-        const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
-        
-        const [customersRes, interactionsRes, subjectsRes, receiptsRes] = await Promise.all([
-          fetch(`/api/customers${ownerIdParam}`),
-          fetch(`/api/interactions`),
-          fetch(`/api/subjects`),
-          fetch(`/api/receipts`)
-        ]);
+      const [customersData, interactionsData, subjectsData, receiptsData] = await Promise.all([
+        customersRes.json(),
+        interactionsRes.json(),
+        subjectsRes.json(),
+        receiptsRes.json()
+      ]);
 
-        const [customersData, interactionsData, subjectsData, receiptsData] = await Promise.all([
-          customersRes.json(),
-          interactionsRes.json(),
-          subjectsRes.json(),
-          receiptsRes.json()
-        ]);
+      setCustomers(Array.isArray(customersData) ? customersData : []);
+      setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
+      setReceipts(Array.isArray(receiptsData) ? receiptsData : []);
 
-        setCustomers(Array.isArray(customersData) ? customersData : []);
-        setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
-        setReceipts(Array.isArray(receiptsData) ? receiptsData : []);
-
-        const latest: Record<string, Interaction> = {};
-        if (Array.isArray(interactionsData)) {
-          interactionsData.forEach((data: Interaction) => {
-            if (!latest[data.customerId]) {
-              latest[data.customerId] = data;
-            }
-          });
-        }
-        setInteractions(latest);
-      } catch (error) {
-        console.error("Error fetching data:", error);
+      const latest: Record<string, Interaction> = {};
+      if (Array.isArray(interactionsData)) {
+        interactionsData.forEach((data: Interaction) => {
+          if (!latest[data.customerId]) {
+            latest[data.customerId] = data;
+          }
+        });
       }
-    };
+      setInteractions(latest);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    }
+  }, [profile]);
 
+  useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30000); // Poll every 30s as a simple fallback for real-time
     return () => clearInterval(interval);
-  }, [profile]);
+  }, [fetchData]);
 
   const handleCreateReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !selectedCustomer) return;
 
-    const totalAmount = parseInt(selectedCustomer.closedAmount.toString().replace(/\D/g, '')) || 0;
+    const totalAmount = parseInt(String(selectedCustomer.closedAmount || '').replace(/\D/g, '')) || 0;
     
     const totalPaid = receipts
       .filter(r => r.customerId === selectedCustomer.id)
-      .reduce((sum, r) => sum + r.amount, 0);
+      .reduce((sum, r) => sum + Number(r.amount), 0);
     
-    const remainingAmount = totalAmount - totalPaid - receiptData.amount;
+    const remainingAmount = totalAmount - totalPaid - Number(receiptData.amount);
 
     const isAdmin = profile.role === 'admin';
     const receiptDate = new Date(receiptData.date).getTime();
@@ -217,10 +216,11 @@ export default function CustomerList({ profile }: CustomerListProps) {
           attachmentUrl: ''
         });
         // Refresh data
-        window.location.reload();
+        fetchData();
       }
     } catch (error) {
       console.error("Error creating receipt:", error);
+      alert("Lỗi khi lưu phiếu thu. Vui lòng thử lại hoặc liên hệ quản trị viên.");
     }
   };
 
@@ -253,13 +253,17 @@ export default function CustomerList({ profile }: CustomerListProps) {
     if (!profile) return;
 
     const { initialInteraction, appointmentTime, appointmentContent, ...customerData } = formData;
-    const data = {
+    const data: any = {
       ...customerData,
-      closedAmount: customerData.closedAmount.replace(/[^0-9]/g, ""),
-      ownerId: profile.uid,
-      ownerName: profile.displayName,
+      closedAmount: String(customerData.closedAmount || '').replace(/[^0-9]/g, ""),
       updatedAt: Date.now()
     };
+
+    if (!selectedCustomer) {
+      data.ownerId = profile.uid;
+      data.ownerName = profile.displayName || profile.email;
+      data.createdAt = Date.now();
+    }
 
     try {
       let customerId = '';
@@ -267,18 +271,28 @@ export default function CustomerList({ profile }: CustomerListProps) {
 
       if (selectedCustomer) {
         customerId = selectedCustomer.id;
-        await fetch(`/api/customers/${customerId}`, {
+        const res = await fetch(`/api/customers/${customerId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
+        if (!res.ok) throw new Error('Failed to update customer');
       } else {
         const res = await fetch('/api/customers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...data, createdAt: Date.now() })
+          body: JSON.stringify(data)
         });
+        
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.details || 'Failed to create customer');
+        }
+
         const newCustomer = await res.json();
+        if (!newCustomer || !newCustomer.id) {
+          throw new Error('Server returned invalid customer data');
+        }
         customerId = newCustomer.id;
 
         if (initialInteraction.trim()) {
@@ -333,7 +347,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
         appointmentTime: 0,
         appointmentContent: ''
       });
-      window.location.reload();
+      fetchData();
     } catch (err) {
       console.error("Error submitting customer:", err);
     }
@@ -350,7 +364,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
       await fetch(`/api/customers/${customerToDelete}`, { method: 'DELETE' });
       setIsDeleteModalOpen(false);
       setCustomerToDelete(null);
-      window.location.reload();
+      fetchData();
     } catch (err) {
       console.error("Error deleting customer:", err);
     }
@@ -387,7 +401,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
       setIsQuickNoteOpen(false);
       setQuickNoteData({ content: '', status: 'đã liên hệ', notes: '' });
       setSelectedCustomer(null);
-      window.location.reload();
+      fetchData();
     } catch (err) {
       console.error("Error submitting quick note:", err);
     }
@@ -496,7 +510,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
           if (errors > 0) {
             console.log("Import Errors:", errorMessages);
           }
-          window.location.reload();
+          fetchData();
         } else {
           alert(errors > 0 ? `Không thể nhập khách hàng. Có ${errors} lỗi xảy ra. Xem console để biết chi tiết.` : 'Không tìm thấy dữ liệu hợp lệ để nhập. Vui lòng kiểm tra tiêu đề cột (Họ tên, SĐT).');
           console.log("Import Errors:", errorMessages);
@@ -681,7 +695,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                           <button 
                             onClick={() => {
                               setSelectedCustomer(customer);
-                              const totalAmount = parseInt(customer.closedAmount.replace(/\D/g, '')) || 0;
+                              const totalAmount = parseInt(String(customer.closedAmount || '').replace(/\D/g, '')) || 0;
                               const totalPaid = receipts
                                 .filter(r => r.customerId === customer.id)
                                 .reduce((sum, r) => sum + r.amount, 0);
@@ -719,7 +733,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
               })}
               {filteredCustomers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-gray-400">
+                  <td colSpan={10} className="px-6 py-12 text-center text-gray-400">
                     Không tìm thấy khách hàng nào phù hợp.
                   </td>
                 </tr>
@@ -948,7 +962,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                   <div>
                     <p className="text-xs text-gray-500">Đã thu trước đó</p>
                     <p className="font-bold text-blue-600">
-                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id).reduce((sum, r) => sum + r.amount, 0))} VNĐ
+                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id).reduce((sum, r) => sum + Number(r.amount), 0))} VNĐ
                     </p>
                   </div>
                 </div>
@@ -968,10 +982,14 @@ export default function CustomerList({ profile }: CustomerListProps) {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Số tiền thu (VNĐ) *</label>
                   <input
-                    type="number"
+                    type="text"
                     required
-                    value={receiptData.amount}
-                    onChange={(e) => setReceiptData({ ...receiptData, amount: parseInt(e.target.value) || 0 })}
+                    value={formatNumber(receiptData.amount)}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setReceiptData({ ...receiptData, amount: parseInt(val) || 0 });
+                    }}
+                    placeholder="0"
                     className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                   />
                 </div>

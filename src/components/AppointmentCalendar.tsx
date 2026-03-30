@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -110,35 +110,34 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
     status: 'chưa diễn ra' as AppointmentStatus
   });
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!profile) return;
+    try {
+      const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
+      const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
 
-    const fetchData = async () => {
-      try {
-        const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
-        const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
+      const [appointmentsRes, customersRes] = await Promise.all([
+        fetch(`/api/appointments${staffIdParam}`),
+        fetch(`/api/customers${ownerIdParam}`)
+      ]);
 
-        const [appointmentsRes, customersRes] = await Promise.all([
-          fetch(`/api/appointments${staffIdParam}`),
-          fetch(`/api/customers${ownerIdParam}`)
-        ]);
+      const [appointmentsData, customersData] = await Promise.all([
+        appointmentsRes.json(),
+        customersRes.json()
+      ]);
 
-        const [appointmentsData, customersData] = await Promise.all([
-          appointmentsRes.json(),
-          customersRes.json()
-        ]);
+      setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
+      setCustomers(Array.isArray(customersData) ? customersData : []);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    }
+  }, [profile]);
 
-        setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
-        setCustomers(Array.isArray(customersData) ? customersData : []);
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      }
-    };
-
+  useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [profile]);
+  }, [fetchData]);
 
   // Effect to automatically update status for past appointments
   useEffect(() => {
@@ -180,7 +179,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
     e.preventDefault();
     if (!profile) return;
 
-    const customer = customers.find(c => c.id === formData.customerId);
+    const customer = customers.find(c => String(c.id) === String(formData.customerId));
     if (!customer) return;
 
     const data = {
@@ -213,7 +212,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
       }
       setIsModalOpen(false);
       setSelectedAppointment(null);
-      window.location.reload();
+      fetchData();
     } catch (err) {
       console.error("Error submitting appointment:", err);
     }
@@ -226,7 +225,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, updatedAt: Date.now() })
       });
-      window.location.reload();
+      fetchData();
     } catch (err) {
       console.error("Error updating status:", err);
     }
@@ -236,18 +235,25 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
     if (!window.confirm('Bạn có chắc chắn muốn xóa lịch hẹn này?')) return;
     try {
       await fetch(`/api/appointments/${id}`, { method: 'DELETE' });
-      window.location.reload();
+      fetchData();
     } catch (err) {
       console.error("Error deleting appointment:", err);
     }
   };
 
-  const filteredAppointments = appointments.filter(app => {
-    const matchesSearch = app.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         app.content.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = filterStatus === 'all' || app.status === filterStatus;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredAppointments = appointments
+    .filter(app => {
+      const matchesSearch = app.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           app.content.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = filterStatus === 'all' || app.status === filterStatus;
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      const now = Date.now();
+      const diffA = Math.abs(a.time - now);
+      const diffB = Math.abs(b.time - now);
+      return diffA - diffB;
+    });
 
   const getStatusBadge = (status: AppointmentStatus) => {
     const base = "px-3 py-1 rounded-full text-xs font-medium inline-flex items-center justify-center min-w-[100px]";
@@ -402,6 +408,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
               <div className="space-y-4">
                 {appointments
                   .filter(a => a.time > Date.now() && a.status === 'chưa diễn ra')
+                  .sort((a, b) => a.time - b.time)
                   .slice(0, 5)
                   .map(app => (
                     <div key={app.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100 group hover:border-blue-200 transition-all">
@@ -471,7 +478,13 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filteredAppointments.map((app) => (
-                    <tr key={app.id} className="hover:bg-gray-50/50 transition-all border-b border-gray-100">
+                    <tr 
+                      key={app.id} 
+                      className={cn(
+                        "hover:bg-gray-50/50 transition-all border-b border-gray-100",
+                        isToday(new Date(app.time)) && "bg-blue-50 hover:bg-blue-100"
+                      )}
+                    >
                       <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
                         {formatDate(app.time)}
                       </td>

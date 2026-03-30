@@ -65,6 +65,10 @@ export interface Teacher {
   phone: string;
   email: string;
   subjects: string[];
+  dob?: string;
+  qualification?: string;
+  pedagogical?: boolean;
+  address?: string;
   createdAt: number;
 }
 
@@ -112,6 +116,7 @@ export interface Class {
   roomId?: string;
   roomName?: string;
   roomLink?: string;
+  zaloLink?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -149,6 +154,7 @@ export interface Attendance {
   note?: string;
   takenById: string;
   takenByName: string;
+  date: number;
   updatedAt: number;
 }
 

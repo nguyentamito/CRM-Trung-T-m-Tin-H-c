@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, 
   UserCheck, 
@@ -7,7 +7,8 @@ import {
   ArrowUpRight,
   ArrowDownRight
 } from 'lucide-react';
-import { Customer, Appointment, UserProfile } from '../types';
+import { Customer, Appointment, UserProfile, Receipt } from '../types';
+import { formatNumber } from '../lib/utils';
 import { 
   BarChart, 
   Bar, 
@@ -28,6 +29,7 @@ interface DashboardProps {
 export default function Dashboard({ profile }: DashboardProps) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,18 +40,21 @@ export default function Dashboard({ profile }: DashboardProps) {
         const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
         const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
 
-        const [appointmentsRes, customersRes] = await Promise.all([
+        const [appointmentsRes, customersRes, receiptsRes] = await Promise.all([
           fetch(`/api/appointments${staffIdParam}`),
-          fetch(`/api/customers${ownerIdParam}`)
+          fetch(`/api/customers${ownerIdParam}`),
+          fetch(`/api/receipts${staffIdParam}`)
         ]);
 
-        const [appointmentsData, customersData] = await Promise.all([
+        const [appointmentsData, customersData, receiptsData] = await Promise.all([
           appointmentsRes.json(),
-          customersRes.json()
+          customersRes.json(),
+          receiptsRes.json()
         ]);
 
         setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
         setCustomers(Array.isArray(customersData) ? customersData : []);
+        setReceipts(Array.isArray(receiptsData) ? receiptsData : []);
         setLoading(false);
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
@@ -63,12 +68,12 @@ export default function Dashboard({ profile }: DashboardProps) {
   const stats = [
     { label: 'Tổng khách hàng', value: customers.length, icon: Users, color: 'blue' },
     { label: 'Khách hàng mới', value: customers.filter(c => c.createdAt > Date.now() - 30 * 24 * 60 * 60 * 1000).length, icon: TrendingUp, color: 'green' },
-    { label: 'Lịch hẹn hôm nay', value: appointments.filter(a => {
-      const today = new Date();
-      const appDate = new Date(a.time);
-      return today.toDateString() === appDate.toDateString();
-    }).length, icon: Clock, color: 'orange' },
-    { label: 'Đã chốt', value: customers.filter(c => c.status === 'Đã chốt').length, icon: UserCheck, color: 'purple' },
+    { label: 'Doanh thu tháng này', value: formatNumber(receipts.filter(r => {
+      const date = new Date(r.date || r.createdAt);
+      const now = new Date();
+      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() && r.status === 'approved';
+    }).reduce((sum, r) => sum + Number(r.amount || 0), 0)), icon: ArrowUpRight, color: 'emerald' },
+    { label: 'Đã chốt', value: customers.filter(c => ['Đã chốt', 'Đã đóng tiền', 'Đã cọc'].includes(c.status)).length, icon: UserCheck, color: 'purple' },
   ];
 
   const statusData = [
@@ -82,14 +87,25 @@ export default function Dashboard({ profile }: DashboardProps) {
 
   const COLORS = ['#10b981', '#34d399', '#3b82f6', '#f59e0b', '#8b5cf6', '#94a3b8'];
 
-  const monthlyData = [
-    { name: 'T1', value: 40 },
-    { name: 'T2', value: 30 },
-    { name: 'T3', value: 60 },
-    { name: 'T4', value: 45 },
-    { name: 'T5', value: 75 },
-    { name: 'T6', value: 55 },
-  ];
+  const monthlyData = useMemo(() => {
+    const last6Months = Array.from({ length: 6 }).map((_, i) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - (5 - i));
+      return {
+        name: `T${d.getMonth() + 1}`,
+        month: d.getMonth(),
+        year: d.getFullYear()
+      };
+    });
+
+    return last6Months.map(m => {
+      const count = customers.filter(c => {
+        const date = new Date(c.createdAt);
+        return date.getMonth() === m.month && date.getFullYear() === m.year;
+      }).length;
+      return { name: m.name, value: count };
+    });
+  }, [customers]);
 
   return (
     <div className="space-y-8">

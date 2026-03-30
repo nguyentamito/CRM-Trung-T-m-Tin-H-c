@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     staffName VARCHAR(255),
     date BIGINT,
     status VARCHAR(20),
-    attachmentUrl TEXT,
+    attachmentUrl LONGTEXT,
     createdAt BIGINT,
     updatedAt BIGINT,
     FOREIGN KEY (customerId) REFERENCES customers(id) ON DELETE SET NULL
@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS payment_vouchers (
     staffName VARCHAR(255),
     date BIGINT,
     status VARCHAR(20),
-    attachmentUrl TEXT,
+    attachmentUrl LONGTEXT,
     createdAt BIGINT,
     updatedAt BIGINT
 );
