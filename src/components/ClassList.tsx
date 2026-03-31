@@ -20,6 +20,7 @@ import {
 import { format, startOfWeek, addDays, addWeeks, subWeeks, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import SearchableSelect from './SearchableSelect';
+import Pagination from './Pagination';
 
 interface ClassListProps {
   profile: UserProfile | null;
@@ -36,6 +37,8 @@ export default function ClassList({ profile }: ClassListProps) {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [viewType, setViewType] = useState<'table' | 'calendar'>('table');
   const [currentWeekStart, setCurrentWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -115,14 +118,14 @@ export default function ClassList({ profile }: ClassListProps) {
         attendanceData,
         roomsData
       ] = await Promise.all([
-        classesRes.json(),
-        teachersRes.json(),
-        tasRes.json(),
-        customersRes.json(),
-        subjectsRes.json(),
-        sessionsRes.json(),
-        attendanceRes.json(),
-        roomsRes.json()
+        classesRes.ok ? classesRes.json() : Promise.resolve([]),
+        teachersRes.ok ? teachersRes.json() : Promise.resolve([]),
+        tasRes.ok ? tasRes.json() : Promise.resolve([]),
+        customersRes.ok ? customersRes.json() : Promise.resolve([]),
+        subjectsRes.ok ? subjectsRes.json() : Promise.resolve([]),
+        sessionsRes.ok ? sessionsRes.json() : Promise.resolve([]),
+        attendanceRes.ok ? attendanceRes.json() : Promise.resolve([]),
+        roomsRes.ok ? roomsRes.json() : Promise.resolve([])
       ]);
 
       const parsedClasses = (Array.isArray(classesData) ? classesData : []).map((c: any) => ({
@@ -486,6 +489,12 @@ export default function ClassList({ profile }: ClassListProps) {
     return matchesSearch && matchesStatus;
   });
 
+  const totalPages = Math.ceil(filteredClasses.length / itemsPerPage);
+  const paginatedClasses = filteredClasses.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
 
   if (viewMode === 'students' && selectedClassForStudents) {
@@ -741,7 +750,7 @@ export default function ClassList({ profile }: ClassListProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filteredClasses.map((cls) => (
+                {paginatedClasses.map((cls) => (
                   <tr key={cls.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -844,6 +853,11 @@ export default function ClassList({ profile }: ClassListProps) {
               </tbody>
             </table>
           </div>
+          <Pagination 
+            currentPage={currentPage} 
+            totalPages={totalPages} 
+            onPageChange={setCurrentPage} 
+          />
           {filteredClasses.length === 0 && (
             <div className="text-center py-12 text-gray-500 italic">
               Không tìm thấy lớp học nào phù hợp.

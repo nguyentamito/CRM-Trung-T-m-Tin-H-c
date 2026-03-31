@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, parseISO } from 'date-fns';
 import { cn, formatNumber } from '../lib/utils';
+import Pagination from './Pagination';
 import { printPaymentVoucher } from './PaymentVoucherPrint';
 
 interface PaymentVoucherManagerProps {
@@ -47,6 +48,8 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
   const [selectedVoucher, setSelectedVoucher] = useState<PaymentVoucher | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [dateRange, setDateRange] = useState({
     start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
@@ -71,18 +74,18 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
     try {
       const [vouchersRes, centerRes, staffRes, teachersRes, tasRes] = await Promise.all([
         fetch('/api/payment_vouchers'),
-        fetch('/api/settings/default'),
+        fetch('/api/settings/center_info'),
         fetch('/api/users'),
         fetch('/api/teachers'),
         fetch('/api/teaching_assistants')
       ]);
 
       const [vouchersData, centerData, staffData, teachersData, tasData] = await Promise.all([
-        vouchersRes.json(),
-        centerRes.json(),
-        staffRes.json(),
-        teachersRes.json(),
-        tasRes.json()
+        vouchersRes.ok ? vouchersRes.json() : Promise.resolve([]),
+        centerRes.ok ? centerRes.json() : Promise.resolve({}),
+        staffRes.ok ? staffRes.json() : Promise.resolve([]),
+        teachersRes.ok ? teachersRes.json() : Promise.resolve([]),
+        tasRes.ok ? tasRes.json() : Promise.resolve([])
       ]);
 
       setVouchers(Array.isArray(vouchersData) ? vouchersData : []);
@@ -125,6 +128,17 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
     }
 
     try {
+      // Update date range to include the saved voucher's month
+      const savedDateStr = formData.date;
+      const savedDate = parseISO(savedDateStr);
+      const newStart = format(startOfMonth(savedDate), 'yyyy-MM-dd');
+      const newEnd = format(endOfMonth(savedDate), 'yyyy-MM-dd');
+      
+      // Only update if the saved date is outside current range
+      if (savedDateStr < dateRange.start || savedDateStr > dateRange.end) {
+        setDateRange({ start: newStart, end: newEnd });
+      }
+
       if (selectedVoucher) {
         await fetch(`/api/payment_vouchers/${selectedVoucher.id}`, {
           method: 'PUT',
@@ -139,7 +153,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
         await fetch('/api/payment_vouchers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
+          body: JSON.stringify({ ...data, voucherNumber })
         });
       }
       fetchData();
@@ -226,6 +240,12 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
   }).sort((a, b) => (b.date || b.createdAt) - (a.date || a.createdAt));
 
   const totalSpent = filteredVouchers.reduce((sum, v) => sum + v.amount, 0);
+
+  const totalPages = Math.ceil(filteredVouchers.length / itemsPerPage);
+  const paginatedVouchers = filteredVouchers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   const openEditModal = (voucher: PaymentVoucher) => {
     setSelectedVoucher(voucher);
@@ -375,7 +395,7 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredVouchers.map((voucher) => (
+              {paginatedVouchers.map((voucher) => (
                 <tr key={voucher.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-red-600">{voucher.voucherNumber}</div>
@@ -468,6 +488,11 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
 
       {isModalOpen && (

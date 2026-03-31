@@ -22,6 +22,7 @@ import {
 import { format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, parseISO } from 'date-fns';
 import { cn, formatNumber } from '../lib/utils';
 import { printReceipt } from './ReceiptPrint';
+import Pagination from './Pagination';
 
 interface ReceiptManagerProps {
   profile: UserProfile | null;
@@ -44,6 +45,8 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [dateRange, setDateRange] = useState({
     start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
@@ -70,7 +73,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
         const [receiptsRes, customersRes, settingsRes] = await Promise.all([
           fetch('/api/receipts'),
           fetch('/api/customers'),
-          fetch('/api/settings')
+          fetch('/api/settings/center_info')
         ]);
 
         if (receiptsRes.ok) {
@@ -110,10 +113,11 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     const closedAmountStr = customer.closedAmount ? customer.closedAmount.toString() : '0';
     const totalAmount = parseInt(closedAmountStr.replace(/\D/g, '')) || 0;
     const totalPaid = receipts
-      .filter(r => r.customerId === customer.id && r.id !== selectedReceipt?.id && r.status === 'approved')
+      .filter(r => String(r.customerId) === String(customer.id) && r.id !== selectedReceipt?.id && r.status !== 'rejected')
       .reduce((sum, r) => sum + Number(r.amount || 0), 0);
     
     const remainingAmount = totalAmount - totalPaid - Number(formData.amount);
+    const selectedDate = parseISO(formData.date);
 
     const data: any = {
       customerId: customer.id,
@@ -127,7 +131,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
       paymentMethod: formData.paymentMethod,
       note: formData.note || '',
       attachmentUrl: formData.attachmentUrl || '',
-      date: parseISO(formData.date).getTime(),
+      date: selectedDate.getTime(),
       status: isAdmin ? 'approved' : 'pending',
       updatedAt: Date.now()
     };
@@ -139,8 +143,19 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     }
 
     try {
+      // Update date range to include the saved receipt's month
+      const savedDateStr = formData.date;
+      const savedDate = parseISO(savedDateStr);
+      const newStart = format(startOfMonth(savedDate), 'yyyy-MM-dd');
+      const newEnd = format(endOfMonth(savedDate), 'yyyy-MM-dd');
+      
+      // Only update if the saved date is outside current range
+      if (savedDateStr < dateRange.start || savedDateStr > dateRange.end) {
+        setDateRange({ start: newStart, end: newEnd });
+      }
+
       if (selectedReceipt) {
-        const receiptNumber = selectedReceipt.receiptNumber || `PT-${format(new Date(selectedReceipt.date || selectedReceipt.createdAt || Date.now()), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const receiptNumber = selectedReceipt.receiptNumber || `PT-${format(selectedDate, 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
         const response = await fetch(`/api/receipts/${selectedReceipt.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -154,8 +169,8 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
           setFormData({
             customerId: '',
             amount: 0,
-            type: 'cọc',
-            paymentMethod: 'tiền mặt',
+            type: 'đóng 100%',
+            paymentMethod: 'chuyển khoản',
             note: '',
             date: format(new Date(), 'yyyy-MM-dd'),
             attachmentUrl: ''
@@ -165,7 +180,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
           alert(`Lỗi khi cập nhật phiếu thu: ${errorData.error || response.statusText}`);
         }
       } else {
-        const receiptNumber = `PT-${format(new Date(data.date), 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const receiptNumber = `PT-${format(selectedDate, 'yyyyMMdd')}-${Math.floor(1000 + Math.random() * 9000)}`;
         const response = await fetch('/api/receipts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -178,8 +193,8 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
           setFormData({
             customerId: '',
             amount: 0,
-            type: 'cọc',
-            paymentMethod: 'tiền mặt',
+            type: 'đóng 100%',
+            paymentMethod: 'chuyển khoản',
             note: '',
             date: format(new Date(), 'yyyy-MM-dd'),
             attachmentUrl: ''
@@ -206,11 +221,21 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     const matchesDate = isWithinInterval(receiptDate, { start: startDate, end: endDate });
 
     return matchesSearch && matchesType && matchesDate;
+  }).sort((a, b) => {
+    const dateA = a.date || a.createdAt || 0;
+    const dateB = b.date || b.createdAt || 0;
+    return Number(dateB) - Number(dateA);
   });
 
   const totalCollected = filteredReceipts
     .filter(r => r.status === 'approved')
     .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+  const totalPages = Math.ceil(filteredReceipts.length / itemsPerPage);
+  const paginatedReceipts = filteredReceipts.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   const openEditModal = (receipt: Receipt) => {
     if (!isAdmin) return;
@@ -395,7 +420,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredReceipts.map((receipt) => (
+              {paginatedReceipts.map((receipt) => (
                 <tr key={receipt.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-blue-600">{receipt.receiptNumber || 'N/A'}</div>
@@ -505,7 +530,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
               ))}
               {filteredReceipts.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
                     Không tìm thấy phiếu thu nào
                   </td>
                 </tr>
@@ -513,6 +538,11 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
 
       {isModalOpen && (

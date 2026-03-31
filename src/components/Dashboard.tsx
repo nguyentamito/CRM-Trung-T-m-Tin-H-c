@@ -47,9 +47,9 @@ export default function Dashboard({ profile }: DashboardProps) {
         ]);
 
         const [appointmentsData, customersData, receiptsData] = await Promise.all([
-          appointmentsRes.json(),
-          customersRes.json(),
-          receiptsRes.json()
+          appointmentsRes.ok ? appointmentsRes.json() : Promise.resolve([]),
+          customersRes.ok ? customersRes.json() : Promise.resolve([]),
+          receiptsRes.ok ? receiptsRes.json() : Promise.resolve([])
         ]);
 
         setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);

@@ -1,10 +1,15 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import cors from "cors";
+import dotenv from "dotenv";
 import poolGetter from "./src/db.ts";
 
+dotenv.config();
+
 async function startServer() {
+  console.log("Server starting...");
   const app = express();
   const PORT = 3000;
 
@@ -13,8 +18,45 @@ async function startServer() {
 
   // API routes
   app.get("/api/health", (req, res) => {
+    console.log("Health check requested");
     res.json({ status: "ok" });
   });
+
+  // Initialize database schema
+  const initDb = async () => {
+    try {
+      const pool = poolGetter();
+      if (!pool) {
+        console.warn("Database pool not available for schema initialization");
+        return;
+      }
+      
+      console.log("Starting database schema initialization...");
+      const schemaPath = path.join(process.cwd(), 'schema.sql');
+      if (fs.existsSync(schemaPath)) {
+        const schema = fs.readFileSync(schemaPath, 'utf8');
+        const statements = schema
+          .split(';')
+          .map(s => s.trim())
+          .filter(s => s.length > 0);
+        
+        for (const statement of statements) {
+          try {
+            await pool.query(statement);
+          } catch (err: any) {
+            if (!err.message.includes("already exists") && !err.message.includes("Duplicate")) {
+              console.warn(`Warning executing statement: ${err.message}`);
+            }
+          }
+        }
+        console.log("Database schema initialization completed");
+      }
+    } catch (error) {
+      console.error("Error initializing database schema:", error);
+    }
+  };
+  // Don't await here to prevent blocking server start if DB is slow/unreachable
+  initDb();
 
   app.get("/api/db-check", async (req, res) => {
     try {
@@ -110,6 +152,7 @@ async function startServer() {
 
   // Generic CRUD helper
   const createCrudRoutes = (collectionName: string, tableName: string, idColumn: string = "id", orderByColumn?: string) => {
+    console.log(`Registering CRUD routes for: /api/${collectionName} (table: ${tableName})`);
     app.get(`/api/${collectionName}`, async (req, res) => {
       try {
         const pool = poolGetter();
@@ -355,32 +398,6 @@ async function startServer() {
     }
   });
 
-  app.put("/api/settings/center_info", async (req, res) => {
-    const { name, address, website } = req.body;
-    try {
-      const pool = poolGetter();
-      if (!pool) return res.status(503).json({ error: "Database not configured" });
-      
-      const [rows]: any = await pool.query("SELECT id FROM center_info LIMIT 1");
-      if (rows.length > 0) {
-        await pool.query(
-          "UPDATE center_info SET name = ?, address = ?, website = ?, updatedAt = ? WHERE id = ?",
-          [name, address, website, Date.now(), rows[0].id]
-        );
-        res.json({ id: rows[0].id, name, address, website });
-      } else {
-        await pool.query(
-          "INSERT INTO center_info (id, name, address, website, updatedAt) VALUES (?, ?, ?, ?, ?)",
-          ['default', name, address, website, Date.now()]
-        );
-        res.json({ id: 'default', name, address, website });
-      }
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Internal Server Error" });
-    }
-  });
-
   createCrudRoutes("customers", "customers", "id", "consultationDate");
   createCrudRoutes("interactions", "interactions", "id", "createdAt");
   createCrudRoutes("subjects", "subjects", "id", "name");
@@ -454,13 +471,25 @@ async function startServer() {
     }
   });
 
+  // Catch-all for non-existent API routes
+  app.all("/api/*", (req, res) => {
+    console.log(`API route not found: ${req.method} ${req.url}`);
+    res.status(404).json({ error: "API route not found" });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    try {
+      console.log("Initializing Vite middleware...");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("Vite middleware initialized.");
+    } catch (err) {
+      console.error("Failed to initialize Vite middleware:", err);
+    }
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

@@ -8,8 +8,11 @@ import {
   X, 
   User, 
   Phone, 
-  Mail 
+  Mail,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
+import Pagination from './Pagination';
 
 interface TAListProps {
   profile: UserProfile | null;
@@ -18,6 +21,8 @@ interface TAListProps {
 export default function TAList({ profile }: TAListProps) {
   const [tas, setTAs] = useState<TeachingAssistant[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 9;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTA, setEditingTA] = useState<TeachingAssistant | null>(null);
   const isAdmin = profile?.role === 'admin';
@@ -106,6 +111,12 @@ export default function TAList({ profile }: TAListProps) {
     t.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalPages = Math.ceil(filteredTAs.length / itemsPerPage);
+  const paginatedTAs = filteredTAs.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -133,7 +144,7 @@ export default function TAList({ profile }: TAListProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredTAs.map((ta) => (
+        {paginatedTAs.map((ta) => (
           <div key={ta.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
             <div className="p-6">
               <div className="flex justify-between items-start mb-4">
@@ -172,6 +183,12 @@ export default function TAList({ profile }: TAListProps) {
           </div>
         ))}
       </div>
+
+      <Pagination 
+        currentPage={currentPage} 
+        totalPages={totalPages} 
+        onPageChange={setCurrentPage} 
+      />
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">

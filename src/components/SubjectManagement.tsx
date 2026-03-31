@@ -10,6 +10,7 @@ import {
   X
 } from 'lucide-react';
 import { Subject, UserProfile } from '../types';
+import Pagination from './Pagination';
 
 interface SubjectManagementProps {
   profile: UserProfile | null;
@@ -22,6 +23,8 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
   const [newSubjectName, setNewSubjectName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const fetchSubjects = async () => {
     try {
@@ -34,6 +37,12 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
       setLoading(false);
     }
   };
+
+  const totalPages = Math.ceil(subjects.length / itemsPerPage);
+  const paginatedSubjects = subjects.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   useEffect(() => {
     fetchSubjects();
@@ -161,7 +170,7 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {subjects.map((subject) => (
+            {paginatedSubjects.map((subject) => (
               <div key={subject.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-all group">
                 <div className="flex items-center gap-4 flex-1">
                   <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center group-hover:bg-white transition-all">
@@ -224,6 +233,11 @@ export default function SubjectManagement({ profile }: SubjectManagementProps) {
             ))}
           </div>
         )}
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
     </div>
   );

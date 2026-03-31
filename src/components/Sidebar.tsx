@@ -57,7 +57,7 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
         <span className="hidden md:block font-bold text-xl text-gray-900 truncate">CRM Pro</span>
       </div>
 
-      <nav className="flex-1 px-3 space-y-1 mt-4">
+      <nav className="flex-1 px-3 space-y-1 mt-4 overflow-y-auto custom-scrollbar">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

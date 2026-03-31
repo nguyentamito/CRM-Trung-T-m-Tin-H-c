@@ -9,8 +9,11 @@ import {
   User, 
   Phone, 
   Mail, 
-  BookOpen 
+  BookOpen,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
+import Pagination from './Pagination';
 
 interface TeacherListProps {
   profile: UserProfile | null;
@@ -20,6 +23,8 @@ export default function TeacherList({ profile }: TeacherListProps) {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
   const isAdmin = profile?.role === 'admin';
@@ -145,6 +150,12 @@ export default function TeacherList({ profile }: TeacherListProps) {
     t.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalPages = Math.ceil(filteredTeachers.length / itemsPerPage);
+  const paginatedTeachers = filteredTeachers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const toggleSubject = (subjectName: string) => {
     setFormData(prev => ({
       ...prev,
@@ -196,7 +207,7 @@ export default function TeacherList({ profile }: TeacherListProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filteredTeachers.map((teacher) => (
+              {paginatedTeachers.map((teacher) => (
                 <tr key={teacher.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -260,6 +271,11 @@ export default function TeacherList({ profile }: TeacherListProps) {
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
 
       {isModalOpen && (

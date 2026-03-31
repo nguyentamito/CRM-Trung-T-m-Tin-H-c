@@ -18,6 +18,7 @@ import { db, auth } from '../firebase';
 import { Customer, UserProfile, CustomerStatus, CustomerSource, Interaction, InteractionStatus, Subject, ReceiptType, PaymentMethod, Receipt } from '../types';
 import { cn, formatDate, formatOnlyDate, formatNumber, safeGetISODate, safeGetISODateTime } from '../lib/utils';
 import InteractionTimeline from './InteractionTimeline';
+import Pagination from './Pagination';
 import Papa from 'papaparse';
 
 enum OperationType {
@@ -82,6 +83,8 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const [interactions, setInteractions] = useState<Record<string, Interaction>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isTimelineOpen, setIsTimelineOpen] = useState(false);
@@ -132,10 +135,10 @@ export default function CustomerList({ profile }: CustomerListProps) {
       ]);
 
       const [customersData, interactionsData, subjectsData, receiptsData] = await Promise.all([
-        customersRes.json(),
-        interactionsRes.json(),
-        subjectsRes.json(),
-        receiptsRes.json()
+        customersRes.ok ? customersRes.json() : Promise.resolve([]),
+        interactionsRes.ok ? interactionsRes.json() : Promise.resolve([]),
+        subjectsRes.ok ? subjectsRes.json() : Promise.resolve([]),
+        receiptsRes.ok ? receiptsRes.json() : Promise.resolve([])
       ]);
 
       setCustomers(Array.isArray(customersData) ? customersData : []);
@@ -169,8 +172,8 @@ export default function CustomerList({ profile }: CustomerListProps) {
     const totalAmount = parseInt(String(selectedCustomer.closedAmount || '').replace(/\D/g, '')) || 0;
     
     const totalPaid = receipts
-      .filter(r => r.customerId === selectedCustomer.id)
-      .reduce((sum, r) => sum + Number(r.amount), 0);
+      .filter(r => String(r.customerId) === String(selectedCustomer.id) && r.status !== 'rejected')
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0);
     
     const remainingAmount = totalAmount - totalPaid - Number(receiptData.amount);
 
@@ -247,6 +250,12 @@ export default function CustomerList({ profile }: CustomerListProps) {
     const matchesFilter = filterStatus === 'all' || c.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
+
+  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+  const paginatedCustomers = filteredCustomers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -633,7 +642,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredCustomers.map((customer) => {
+              {paginatedCustomers.map((customer) => {
                 return (
                   <tr key={customer.id} className="hover:bg-gray-50/50 transition-all group border-b border-gray-100">
                     <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
@@ -741,6 +750,11 @@ export default function CustomerList({ profile }: CustomerListProps) {
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
 
       {/* Unified Modal */}

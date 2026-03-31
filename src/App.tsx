@@ -47,6 +47,9 @@ export default function App() {
           
           // Try to fetch profile from MySQL
           const res = await fetch(`/api/users?uid=${user.uid}`);
+          if (!res.ok) {
+            throw new Error(`Server error: ${res.status}`);
+          }
           const users = await res.json();
           const existingProfile = Array.isArray(users) ? users.find((u: any) => u.uid === user.uid) : null;
           
@@ -101,6 +104,8 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const isSystemAdmin = user?.email?.toLowerCase() === 'nguyentamito@gmail.com';
+
   useEffect(() => {
     if (!profile) return;
 
@@ -109,10 +114,12 @@ export default function App() {
         // If not approved, poll for profile update
         if (!profile.isApproved && profile.role !== 'admin' && !isSystemAdmin) {
           const res = await fetch(`/api/users?uid=${profile.uid}`);
-          const users = await res.json();
-          const currentProfile = Array.isArray(users) ? users.find((u: any) => u.uid === profile.uid) : null;
-          if (currentProfile && currentProfile.isApproved) {
-            setProfile(currentProfile);
+          if (res.ok) {
+            const users = await res.json();
+            const currentProfile = Array.isArray(users) ? users.find((u: any) => u.uid === profile.uid) : null;
+            if (currentProfile && currentProfile.isApproved) {
+              setProfile(currentProfile);
+            }
           }
         }
 
@@ -146,13 +153,13 @@ export default function App() {
           attendanceData,
           staffData
         ] = await Promise.all([
-          customersRes.json(),
-          appointmentsRes.json(),
-          receiptsRes.json(),
-          paymentsRes.json(),
-          sessionsRes.json(),
-          attendanceRes.json(),
-          staffRes.json()
+          customersRes.ok ? customersRes.json() : Promise.resolve([]),
+          appointmentsRes.ok ? appointmentsRes.json() : Promise.resolve([]),
+          receiptsRes.ok ? receiptsRes.json() : Promise.resolve([]),
+          paymentsRes.ok ? paymentsRes.json() : Promise.resolve([]),
+          sessionsRes.ok ? sessionsRes.json() : Promise.resolve([]),
+          attendanceRes.ok ? attendanceRes.json() : Promise.resolve([]),
+          staffRes.ok ? staffRes.json() : Promise.resolve([])
         ]);
 
         setCustomers(Array.isArray(customersData) ? customersData : []);
@@ -179,8 +186,6 @@ export default function App() {
       </div>
     );
   }
-
-  const isSystemAdmin = user?.email?.toLowerCase() === 'nguyentamito@gmail.com';
 
   if (user && profile && !profile.isApproved && profile.role !== 'admin' && !isSystemAdmin) {
     return (

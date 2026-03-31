@@ -23,8 +23,11 @@ import {
   BookOpen,
   Globe,
   User,
-  Building
+  Building,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
+import Pagination from './Pagination';
 
 interface RoomListProps {
   profile: UserProfile | null;
@@ -46,6 +49,8 @@ const getRoomIcon = (type: RoomType) => {
 export default function RoomList({ profile }: RoomListProps) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const isAdmin = profile?.role === 'admin';
@@ -146,6 +151,12 @@ export default function RoomList({ profile }: RoomListProps) {
     r.location.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalPages = Math.ceil(filteredRooms.length / itemsPerPage);
+  const paginatedRooms = filteredRooms.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -184,7 +195,7 @@ export default function RoomList({ profile }: RoomListProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredRooms.map((room) => (
+              {paginatedRooms.map((room) => (
                 <tr key={room.id} className="hover:bg-gray-50/50 transition-all border-b border-gray-100">
                   <td className="px-6 py-4 border-r border-gray-100">
                     <div className="flex items-center gap-3">
@@ -233,6 +244,11 @@ export default function RoomList({ profile }: RoomListProps) {
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
 
       {isModalOpen && (

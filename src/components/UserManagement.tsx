@@ -11,6 +11,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import Pagination from './Pagination';
 
 interface UserManagementProps {
   profile: UserProfile | null;
@@ -21,6 +22,8 @@ export default function UserManagement({ profile }: UserManagementProps) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
@@ -28,7 +31,7 @@ export default function UserManagement({ profile }: UserManagementProps) {
   const fetchUsers = async () => {
     try {
       const response = await fetch('/api/users');
-      const data = await response.json();
+      const data = response.ok ? await response.json() : [];
       setUsers(Array.isArray(data) ? data : []);
       setLoading(false);
     } catch (error) {
@@ -94,6 +97,12 @@ export default function UserManagement({ profile }: UserManagementProps) {
      u.email.toLowerCase().includes(searchTerm.toLowerCase())) &&
     (roleFilter === 'all' || u.role === roleFilter) &&
     (approvalFilter === 'all' || (approvalFilter === 'approved' ? u.isApproved : !u.isApproved))
+  );
+
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const paginatedUsers = filteredUsers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
   );
 
   if (loading) {
@@ -164,7 +173,7 @@ export default function UserManagement({ profile }: UserManagementProps) {
                 </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filteredUsers.map((u) => (
+              {paginatedUsers.map((u) => (
                 <tr key={u.uid} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -317,6 +326,11 @@ export default function UserManagement({ profile }: UserManagementProps) {
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
     </div>
   );
