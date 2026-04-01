@@ -122,8 +122,8 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
       ]);
 
       const [appointmentsData, customersData] = await Promise.all([
-        appointmentsRes.json(),
-        customersRes.json()
+        appointmentsRes.ok ? appointmentsRes.json().catch(() => []) : Promise.resolve([]),
+        customersRes.ok ? customersRes.json().catch(() => []) : Promise.resolve([])
       ]);
 
       setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);

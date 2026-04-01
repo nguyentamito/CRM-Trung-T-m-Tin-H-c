@@ -13,7 +13,8 @@ import {
   Receipt as ReceiptIcon,
   Settings as SettingsIcon,
   BarChart3,
-  CreditCard
+  CreditCard,
+  Wallet
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { cn } from '../lib/utils';
@@ -33,6 +34,7 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
     { id: 'attendance', label: 'Điểm danh', icon: CheckCircle2 },
     { id: 'receipts', label: 'Phiếu thu', icon: ReceiptIcon },
     { id: 'payments', label: 'Phiếu chi', icon: CreditCard },
+    { id: 'debt', label: 'Công nợ', icon: Wallet },
     { id: 'reports', label: 'Báo cáo', icon: BarChart3 },
     { id: 'settings', label: 'Cài đặt', icon: SettingsIcon },
   ];
@@ -57,7 +59,7 @@ export default function Sidebar({ activeTab, setActiveTab, profile, onLogout }: 
         <span className="hidden md:block font-bold text-xl text-gray-900 truncate">CRM Pro</span>
       </div>
 
-      <nav className="flex-1 px-3 space-y-1 mt-4 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 px-3 space-y-1 mt-4 overflow-y-auto custom-scrollbar max-h-[calc(100vh-200px)]">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

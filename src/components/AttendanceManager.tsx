@@ -21,6 +21,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { format, startOfDay, endOfDay, addDays, subDays } from 'date-fns';
+import Pagination from './Pagination';
 
 interface AttendanceManagerProps {
   profile: UserProfile | null;
@@ -35,6 +36,16 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<TeachingSession | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'pending'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setSelectedDate(new Date());
+    setCurrentPage(1);
+  };
 
   const fetchData = async () => {
     if (!profile) return;
@@ -50,9 +61,9 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
       ]);
 
       const [sessionsData, classesData, attendanceData] = await Promise.all([
-        sessionsRes.json(),
-        classesRes.json(),
-        attendanceRes.json()
+        sessionsRes.ok ? sessionsRes.json().catch(() => []) : Promise.resolve([]),
+        classesRes.ok ? classesRes.json().catch(() => []) : Promise.resolve([]),
+        attendanceRes.ok ? attendanceRes.json().catch(() => []) : Promise.resolve([])
       ]);
 
       const parsedClasses = (Array.isArray(classesData) ? classesData : []).map((c: any) => ({
@@ -75,6 +86,24 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
   useEffect(() => {
     fetchData();
   }, [selectedDate, profile]);
+
+  const filteredSessions = sessions.filter(s => {
+    const matchesSearch = s.className.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         s.teacherName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         s.subject.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const stats = getAttendanceStats(s.id, s.classId);
+    const matchesStatus = statusFilter === 'all' || 
+                         (statusFilter === 'completed' ? stats.completed : !stats.completed);
+    
+    return matchesSearch && matchesStatus;
+  });
+
+  const totalPages = Math.ceil(filteredSessions.length / itemsPerPage);
+  const paginatedSessions = filteredSessions.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   const handleAttendanceChange = async (studentId: string, studentName: string, status: AttendanceStatus) => {
     if (!selectedSession || !profile) return;
@@ -127,11 +156,6 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
       console.error("Error updating attendance:", error);
     }
   };
-
-  const filteredSessions = sessions.filter(s => 
-    s.className.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.teacherName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   const getAttendanceStats = (sessionId: string, classId: string) => {
     const classData = classes.find(c => String(c.id) === String(classId));
@@ -232,11 +256,21 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-gray-400" />
             <span className="text-sm text-gray-500">Bộ lọc:</span>
-            <select className="text-sm bg-transparent border-none focus:ring-0 font-medium text-gray-700">
-              <option>Tất cả trạng thái</option>
-              <option>Đã điểm danh</option>
-              <option>Chưa điểm danh</option>
+            <select 
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="text-sm bg-transparent border-none focus:ring-0 font-medium text-gray-700"
+            >
+              <option value="all">Tất cả trạng thái</option>
+              <option value="completed">Đã điểm danh</option>
+              <option value="pending">Chưa điểm danh</option>
             </select>
+            <button
+              onClick={clearFilters}
+              className="px-3 py-1 text-xs text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all font-medium border border-gray-200 ml-2"
+            >
+              Xóa lọc
+            </button>
           </div>
         </div>
 
@@ -253,7 +287,7 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredSessions.map((session) => {
+              {paginatedSessions.map((session) => {
                 const stats = getAttendanceStats(session.id, session.classId);
                 return (
                   <tr key={session.id} className="hover:bg-gray-50/50 transition-colors">
@@ -343,6 +377,11 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
             </tbody>
           </table>
         </div>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
       </div>
 
       {isAttendanceModalOpen && selectedSession && (

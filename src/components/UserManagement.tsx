@@ -48,6 +48,19 @@ export default function UserManagement({ profile }: UserManagementProps) {
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
 
+  const filteredUsers = users.filter(u => 
+    (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     u.email.toLowerCase().includes(searchTerm.toLowerCase())) &&
+    (roleFilter === 'all' || u.role === roleFilter) &&
+    (approvalFilter === 'all' || (approvalFilter === 'approved' ? u.isApproved : !u.isApproved))
+  );
+
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const paginatedUsers = filteredUsers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const handleNameUpdate = async (userId: string) => {
     if (!tempName.trim()) return;
     setUpdatingId(userId);
@@ -91,19 +104,6 @@ export default function UserManagement({ profile }: UserManagementProps) {
       setUpdatingId(null);
     }
   };
-
-  const filteredUsers = users.filter(u => 
-    (u.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     u.email.toLowerCase().includes(searchTerm.toLowerCase())) &&
-    (roleFilter === 'all' || u.role === roleFilter) &&
-    (approvalFilter === 'all' || (approvalFilter === 'approved' ? u.isApproved : !u.isApproved))
-  );
-
-  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
-  const paginatedUsers = filteredUsers.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
 
   if (loading) {
     return (

@@ -93,6 +93,13 @@ export default function CustomerList({ profile }: CustomerListProps) {
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [customerToDelete, setCustomerToDelete] = useState<string | null>(null);
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setFilterStatus('all');
+    setCurrentPage(1);
+  };
+
   const [receiptData, setReceiptData] = useState({
     amount: 0,
     type: 'đóng 100%' as ReceiptType,
@@ -135,10 +142,10 @@ export default function CustomerList({ profile }: CustomerListProps) {
       ]);
 
       const [customersData, interactionsData, subjectsData, receiptsData] = await Promise.all([
-        customersRes.ok ? customersRes.json() : Promise.resolve([]),
-        interactionsRes.ok ? interactionsRes.json() : Promise.resolve([]),
-        subjectsRes.ok ? subjectsRes.json() : Promise.resolve([]),
-        receiptsRes.ok ? receiptsRes.json() : Promise.resolve([])
+        customersRes.ok ? customersRes.json().catch(() => []) : Promise.resolve([]),
+        interactionsRes.ok ? interactionsRes.json().catch(() => []) : Promise.resolve([]),
+        subjectsRes.ok ? subjectsRes.json().catch(() => []) : Promise.resolve([]),
+        receiptsRes.ok ? receiptsRes.json().catch(() => []) : Promise.resolve([])
       ]);
 
       setCustomers(Array.isArray(customersData) ? customersData : []);
@@ -172,10 +179,13 @@ export default function CustomerList({ profile }: CustomerListProps) {
     const totalAmount = parseInt(String(selectedCustomer.closedAmount || '').replace(/\D/g, '')) || 0;
     
     const totalPaid = receipts
-      .filter(r => String(r.customerId) === String(selectedCustomer.id) && r.status !== 'rejected')
+      .filter(r => String(r.customerId) === String(selectedCustomer.id) && r.status !== 'rejected' && r.type !== 'thu khác')
       .reduce((sum, r) => sum + Number(r.amount || 0), 0);
     
-    const remainingAmount = totalAmount - totalPaid - Number(receiptData.amount);
+    let remainingAmount = totalAmount - totalPaid;
+    if (receiptData.type !== 'thu khác') {
+      remainingAmount -= Number(receiptData.amount);
+    }
 
     const isAdmin = profile.role === 'admin';
     const receiptDate = new Date(receiptData.date).getTime();
@@ -621,6 +631,12 @@ export default function CustomerList({ profile }: CustomerListProps) {
             <option value="Hẹn lại">Hẹn lại</option>
             <option value="Khác">Khác</option>
           </select>
+          <button
+            onClick={clearFilters}
+            className="px-4 py-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all text-sm font-medium border border-gray-200"
+          >
+            Xóa lọc
+          </button>
         </div>
       </div>
 
@@ -706,7 +722,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                               setSelectedCustomer(customer);
                               const totalAmount = parseInt(String(customer.closedAmount || '').replace(/\D/g, '')) || 0;
                               const totalPaid = receipts
-                                .filter(r => r.customerId === customer.id)
+                                .filter(r => r.customerId === customer.id && r.status !== 'rejected' && r.type !== 'thu khác')
                                 .reduce((sum, r) => sum + r.amount, 0);
                               
                               const remaining = totalAmount - totalPaid;
@@ -976,7 +992,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                   <div>
                     <p className="text-xs text-gray-500">Đã thu trước đó</p>
                     <p className="font-bold text-blue-600">
-                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id).reduce((sum, r) => sum + Number(r.amount), 0))} VNĐ
+                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id && r.type !== 'thu khác' && r.status !== 'rejected').reduce((sum, r) => sum + Number(r.amount), 0))} VNĐ
                     </p>
                   </div>
                 </div>
@@ -1020,6 +1036,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                   <option value="cọc">Cọc</option>
                   <option value="đóng tất">Đóng tất</option>
                   <option value="đóng 100%">Đóng 100%</option>
+                  <option value="thu khác">Thu khác</option>
                 </select>
               </div>
 

@@ -50,9 +50,22 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setCategoryFilter('all');
+    setDateRange({
+      start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+      end: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+      isAll: false
+    });
+    setCurrentPage(1);
+  };
+
   const [dateRange, setDateRange] = useState({
     start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+    end: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+    isAll: false
   });
   
   const [formData, setFormData] = useState({
@@ -128,15 +141,14 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
     }
 
     try {
-      // Update date range to include the saved voucher's month
+      // Update date range to include the saved voucher's month if it's outside current range
       const savedDateStr = formData.date;
       const savedDate = parseISO(savedDateStr);
       const newStart = format(startOfMonth(savedDate), 'yyyy-MM-dd');
       const newEnd = format(endOfMonth(savedDate), 'yyyy-MM-dd');
       
-      // Only update if the saved date is outside current range
-      if (savedDateStr < dateRange.start || savedDateStr > dateRange.end) {
-        setDateRange({ start: newStart, end: newEnd });
+      if (!dateRange.isAll && (savedDateStr < dateRange.start || savedDateStr > dateRange.end)) {
+        setDateRange({ start: newStart, end: newEnd, isAll: false });
       }
 
       if (selectedVoucher) {
@@ -230,14 +242,20 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
     
     const matchesCategory = categoryFilter === 'all' || voucher.category === categoryFilter;
     
-    const voucherDate = voucher.date || voucher.createdAt;
-    const matchesDate = isWithinInterval(voucherDate, {
-      start: startOfDay(parseISO(dateRange.start)),
-      end: endOfDay(parseISO(dateRange.end))
-    });
+    const voucherDate = new Date(voucher.date || voucher.createdAt);
+    let matchesDate = true;
+    if (!dateRange.isAll) {
+      const startDate = startOfDay(parseISO(dateRange.start));
+      const endDate = endOfDay(parseISO(dateRange.end));
+      matchesDate = isWithinInterval(voucherDate, { start: startDate, end: endDate });
+    }
 
     return matchesSearch && matchesCategory && matchesDate;
-  }).sort((a, b) => (b.date || b.createdAt) - (a.date || a.createdAt));
+  }).sort((a, b) => {
+    const dateA = new Date(a.date || a.createdAt).getTime();
+    const dateB = new Date(b.date || b.createdAt).getTime();
+    return dateB - dateA;
+  });
 
   const totalSpent = filteredVouchers.reduce((sum, v) => sum + v.amount, 0);
 
@@ -339,14 +357,21 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
           </div>
           <div className="flex flex-wrap gap-4 w-full md:w-auto">
             <div className="flex-1 min-w-[140px]">
-              <label className="block text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-1">
-                <Calendar size={12} /> Từ ngày
+              <label className="block text-xs font-bold text-gray-400 uppercase mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1"><Calendar size={12} /> Từ ngày</span>
+                <button 
+                  onClick={() => setDateRange(prev => ({ ...prev, isAll: !prev.isAll }))}
+                  className={cn("text-[10px] px-1 rounded", dateRange.isAll ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-500")}
+                >
+                  {dateRange.isAll ? "Bỏ lọc ngày" : "Tất cả"}
+                </button>
               </label>
               <input
                 type="date"
+                disabled={dateRange.isAll}
                 value={dateRange.start}
-                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600"
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value, isAll: false })}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600 disabled:bg-gray-50 disabled:text-gray-400"
               />
             </div>
             <div className="flex-1 min-w-[140px]">
@@ -355,9 +380,10 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
               </label>
               <input
                 type="date"
+                disabled={dateRange.isAll}
                 value={dateRange.end}
-                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600"
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value, isAll: false })}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600/20 focus:border-red-600 disabled:bg-gray-50 disabled:text-gray-400"
               />
             </div>
             <div className="flex-1 min-w-[140px]">
@@ -377,6 +403,14 @@ export default function PaymentVoucherManager({ profile }: PaymentVoucherManager
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="w-full md:w-auto">
+              <button
+                onClick={clearFilters}
+                className="w-full md:w-auto px-4 py-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all text-sm font-medium border border-gray-200"
+              >
+                Xóa lọc
+              </button>
             </div>
           </div>
         </div>

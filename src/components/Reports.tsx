@@ -93,6 +93,10 @@ export default function Reports({
   // Financial Stats
   const financialStats = useMemo(() => {
     const income = Math.round(filteredData.receipts.reduce((sum, r) => sum + Number(r.amount || 0), 0));
+    const tuitionIncome = Math.round(filteredData.receipts
+      .filter(r => r.type !== 'thu khác')
+      .reduce((sum, r) => sum + Number(r.amount || 0), 0));
+    const otherIncome = income - tuitionIncome;
     const expense = Math.round(filteredData.vouchers.reduce((sum, v) => sum + Number(v.amount || 0), 0));
     const profit = income - expense;
 
@@ -112,8 +116,32 @@ export default function Reports({
     });
     const expenseByCategory = Object.entries(expenseByCategoryMap).map(([name, value]) => ({ name, value }));
 
-    return { income, expense, profit, incomeBySubject, expenseByCategory };
+    return { income, tuitionIncome, otherIncome, expense, profit, incomeBySubject, expenseByCategory };
   }, [filteredData.receipts, filteredData.vouchers]);
+
+  // Debt Stats
+  const debtStats = useMemo(() => {
+    const debtors = customers.filter(c => ['Đã chốt', 'Đã đóng tiền', 'Đã cọc'].includes(c.status));
+    
+    const debtBySubjectMap: Record<string, number> = {};
+    let totalDebt = 0;
+    const debtorList = debtors.map(c => {
+      const total = Number(c.closedAmount || 0);
+      const collected = receipts
+        .filter(r => r.customerId === c.id && r.status === 'approved' && r.type !== 'thu khác')
+        .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      const debt = total - collected;
+      if (debt > 0 && collected > 0) {
+        totalDebt += debt;
+        debtBySubjectMap[c.subject] = (debtBySubjectMap[c.subject] || 0) + debt;
+      }
+      return { ...c, debt, collected };
+    }).filter(d => d.debt > 0 && d.collected > 0).sort((a, b) => b.debt - a.debt);
+
+    const debtBySubject = Object.entries(debtBySubjectMap).map(([name, value]) => ({ name, value }));
+
+    return { totalDebt, debtorList, debtBySubject };
+  }, [customers, receipts]);
 
   // Financial Trend Data
   const financialTrendData = useMemo(() => {
@@ -327,15 +355,19 @@ export default function Reports({
       </div>
 
       {/* Financial Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-green-50 text-green-600 rounded-xl">
               <ArrowUpRight className="w-6 h-6" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-sm text-gray-500 font-medium uppercase tracking-wider">Tổng Thu</p>
               <h4 className="text-2xl font-bold text-green-600">{formatNumber(financialStats.income)} VNĐ</h4>
+              <div className="flex gap-4 mt-1 text-[10px] font-bold uppercase tracking-tight">
+                <span className="text-blue-600">Học phí: {formatNumber(financialStats.tuitionIncome)}</span>
+                <span className="text-orange-600">Khác: {formatNumber(financialStats.otherIncome)}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -360,6 +392,17 @@ export default function Reports({
               <h4 className={cn("text-2xl font-bold", financialStats.profit >= 0 ? "text-blue-600" : "text-red-600")}>
                 {formatNumber(financialStats.profit)} VNĐ
               </h4>
+            </div>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-red-50 text-red-600 rounded-xl">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 font-medium uppercase tracking-wider">Tổng Công nợ</p>
+              <h4 className="text-2xl font-bold text-red-600">{formatNumber(debtStats.totalDebt)} VNĐ</h4>
             </div>
           </div>
         </div>
@@ -487,6 +530,41 @@ export default function Reports({
                     <span className="text-gray-500 truncate max-w-[120px]">{item.name}</span>
                   </div>
                   <span className="font-bold text-gray-900">{((item.value / financialStats.expense) * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-bold text-gray-900 mb-4">Cơ cấu công nợ</h3>
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={debtStats.debtBySubject}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={40}
+                    outerRadius={60}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {debtStats.debtBySubject.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => formatNumber(value) + ' VNĐ'} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-4 space-y-2">
+              {debtStats.debtBySubject.slice(0, 3).map((item, index) => (
+                <div key={item.name} className="flex justify-between items-center text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[(index + 4) % COLORS.length] }} />
+                    <span className="text-gray-500 truncate max-w-[120px]">{item.name}</span>
+                  </div>
+                  <span className="font-bold text-gray-900">{debtStats.totalDebt > 0 ? ((item.value / debtStats.totalDebt) * 100).toFixed(1) : 0}%</span>
                 </div>
               ))}
             </div>

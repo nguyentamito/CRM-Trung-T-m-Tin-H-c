@@ -17,6 +17,7 @@ import ClassList from './components/ClassList';
 import AttendanceManager from './components/AttendanceManager';
 import ReceiptManager from './components/ReceiptManager';
 import PaymentVoucherManager from './components/PaymentVoucherManager';
+import DebtManager from './components/DebtManager';
 import UserManagement from './components/UserManagement';
 import Reports from './components/Reports';
 import Settings from './components/Settings';
@@ -48,7 +49,8 @@ export default function App() {
           // Try to fetch profile from MySQL
           const res = await fetch(`/api/users?uid=${user.uid}`);
           if (!res.ok) {
-            throw new Error(`Server error: ${res.status}`);
+            const errorText = await res.text();
+            throw new Error(`Server error: ${res.status} - ${errorText.substring(0, 100)}`);
           }
           const users = await res.json();
           const existingProfile = Array.isArray(users) ? users.find((u: any) => u.uid === user.uid) : null;
@@ -153,13 +155,13 @@ export default function App() {
           attendanceData,
           staffData
         ] = await Promise.all([
-          customersRes.ok ? customersRes.json() : Promise.resolve([]),
-          appointmentsRes.ok ? appointmentsRes.json() : Promise.resolve([]),
-          receiptsRes.ok ? receiptsRes.json() : Promise.resolve([]),
-          paymentsRes.ok ? paymentsRes.json() : Promise.resolve([]),
-          sessionsRes.ok ? sessionsRes.json() : Promise.resolve([]),
-          attendanceRes.ok ? attendanceRes.json() : Promise.resolve([]),
-          staffRes.ok ? staffRes.json() : Promise.resolve([])
+          customersRes.ok ? customersRes.json().catch(() => []) : Promise.resolve([]),
+          appointmentsRes.ok ? appointmentsRes.json().catch(() => []) : Promise.resolve([]),
+          receiptsRes.ok ? receiptsRes.json().catch(() => []) : Promise.resolve([]),
+          paymentsRes.ok ? paymentsRes.json().catch(() => []) : Promise.resolve([]),
+          sessionsRes.ok ? sessionsRes.json().catch(() => []) : Promise.resolve([]),
+          attendanceRes.ok ? attendanceRes.json().catch(() => []) : Promise.resolve([]),
+          staffRes.ok ? staffRes.json().catch(() => []) : Promise.resolve([])
         ]);
 
         setCustomers(Array.isArray(customersData) ? customersData : []);
@@ -275,6 +277,7 @@ export default function App() {
             {activeTab === 'attendance' && <AttendanceManager profile={profile} />}
             {activeTab === 'receipts' && <ReceiptManager profile={profile} />}
             {activeTab === 'payments' && <PaymentVoucherManager profile={profile} />}
+            {activeTab === 'debt' && <DebtManager profile={profile} />}
             {activeTab === 'users' && profile?.role === 'admin' && <UserManagement profile={profile} />}
             {activeTab === 'reports' && (
               <Reports 

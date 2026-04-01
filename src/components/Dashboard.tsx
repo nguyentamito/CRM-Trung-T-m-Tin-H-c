@@ -5,7 +5,8 @@ import {
   Clock, 
   TrendingUp,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Wallet
 } from 'lucide-react';
 import { Customer, Appointment, UserProfile, Receipt } from '../types';
 import { formatNumber } from '../lib/utils';
@@ -47,9 +48,9 @@ export default function Dashboard({ profile }: DashboardProps) {
         ]);
 
         const [appointmentsData, customersData, receiptsData] = await Promise.all([
-          appointmentsRes.ok ? appointmentsRes.json() : Promise.resolve([]),
-          customersRes.ok ? customersRes.json() : Promise.resolve([]),
-          receiptsRes.ok ? receiptsRes.json() : Promise.resolve([])
+          appointmentsRes.ok ? appointmentsRes.json().catch(() => []) : Promise.resolve([]),
+          customersRes.ok ? customersRes.json().catch(() => []) : Promise.resolve([]),
+          receiptsRes.ok ? receiptsRes.json().catch(() => []) : Promise.resolve([])
         ]);
 
         setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
@@ -68,12 +69,48 @@ export default function Dashboard({ profile }: DashboardProps) {
   const stats = [
     { label: 'Tổng khách hàng', value: customers.length, icon: Users, color: 'blue' },
     { label: 'Khách hàng mới', value: customers.filter(c => c.createdAt > Date.now() - 30 * 24 * 60 * 60 * 1000).length, icon: TrendingUp, color: 'green' },
-    { label: 'Doanh thu tháng này', value: formatNumber(receipts.filter(r => {
-      const date = new Date(r.date || r.createdAt);
-      const now = new Date();
-      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() && r.status === 'approved';
-    }).reduce((sum, r) => sum + Number(r.amount || 0), 0)), icon: ArrowUpRight, color: 'emerald' },
+    { label: 'Doanh thu tháng này', value: (
+      <div className="space-y-1">
+        <p className="text-2xl font-bold text-gray-900">
+          {formatNumber(receipts.filter(r => {
+            const date = new Date(r.date || r.createdAt);
+            const now = new Date();
+            return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() && r.status === 'approved';
+          }).reduce((sum, r) => sum + Number(r.amount || 0), 0))}
+        </p>
+        <div className="flex gap-3 text-[10px] font-bold uppercase text-gray-400">
+          <span className="text-blue-500">HP: {formatNumber(receipts.filter(r => {
+            const date = new Date(r.date || r.createdAt);
+            const now = new Date();
+            return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() && r.status === 'approved' && r.type !== 'thu khác';
+          }).reduce((sum, r) => sum + Number(r.amount || 0), 0))}</span>
+          <span className="text-orange-500">Khác: {formatNumber(receipts.filter(r => {
+            const date = new Date(r.date || r.createdAt);
+            const now = new Date();
+            return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() && r.status === 'approved' && r.type === 'thu khác';
+          }).reduce((sum, r) => sum + Number(r.amount || 0), 0))}</span>
+        </div>
+      </div>
+    ), icon: ArrowUpRight, color: 'emerald' },
     { label: 'Đã chốt', value: customers.filter(c => ['Đã chốt', 'Đã đóng tiền', 'Đã cọc'].includes(c.status)).length, icon: UserCheck, color: 'purple' },
+    { label: 'Tổng công nợ', value: (
+      <div className="space-y-1">
+        <p className="text-2xl font-bold text-red-600">
+          {formatNumber(customers
+            .filter(c => ['Đã chốt', 'Đã đóng tiền', 'Đã cọc'].includes(c.status))
+            .reduce((sum, c) => {
+              const total = Number(c.closedAmount || 0);
+              const collected = receipts
+                .filter(r => r.customerId === c.id && r.status === 'approved' && r.type !== 'thu khác')
+                .reduce((s, r) => s + Number(r.amount || 0), 0);
+              const debt = total - collected;
+              // Only count as debt if they have paid something but not everything
+              return sum + (debt > 0 && collected > 0 ? debt : 0);
+            }, 0))}
+        </p>
+        <p className="text-[10px] font-bold uppercase text-gray-400">Học phí còn thiếu</p>
+      </div>
+    ), icon: Wallet, color: 'red' },
   ];
 
   const statusData = [
@@ -124,7 +161,9 @@ export default function Dashboard({ profile }: DashboardProps) {
               </div>
               <div>
                 <p className="text-sm text-gray-500 font-medium">{stat.label}</p>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                {typeof stat.value === 'object' ? stat.value : (
+                  <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                )}
               </div>
             </div>
           );

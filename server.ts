@@ -14,7 +14,30 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+
+  // Request logger
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/api/')) {
+      console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    }
+    next();
+  });
+
+  // Process-level error handlers
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  });
+
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception thrown:', err);
+  });
+
+  // Ensure API routes always return JSON
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Content-Type', 'application/json');
+    next();
+  });
 
   // API routes
   app.get("/api/health", (req, res) => {
@@ -22,7 +45,7 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  // Initialize database schema
+  // Initialize database schema in background
   const initDb = async () => {
     try {
       const pool = poolGetter();
@@ -477,6 +500,28 @@ async function startServer() {
     res.status(404).json({ error: "API route not found" });
   });
 
+  // Global error handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("Global Error Handler:", err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: err.message,
+      stack: process.env.NODE_ENV === 'production' ? undefined : err.stack
+    });
+  });
+
+  // Process-level error handlers
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  });
+
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception thrown:', err);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     try {
@@ -492,14 +537,19 @@ async function startServer() {
     }
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    } else {
+      console.warn("Dist directory not found. Static files will not be served.");
+    }
   }
 
+  // Start listening at the very end
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server listening on port ${PORT}`);
   });
 }
 

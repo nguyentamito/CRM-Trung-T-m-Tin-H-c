@@ -47,9 +47,22 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setTypeFilter('all');
+    setDateRange({
+      start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+      end: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+      isAll: false
+    });
+    setCurrentPage(1);
+  };
+
   const [dateRange, setDateRange] = useState({
     start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+    end: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+    isAll: false
   });
   
   const [formData, setFormData] = useState({
@@ -113,10 +126,13 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     const closedAmountStr = customer.closedAmount ? customer.closedAmount.toString() : '0';
     const totalAmount = parseInt(closedAmountStr.replace(/\D/g, '')) || 0;
     const totalPaid = receipts
-      .filter(r => String(r.customerId) === String(customer.id) && r.id !== selectedReceipt?.id && r.status !== 'rejected')
+      .filter(r => String(r.customerId) === String(customer.id) && r.id !== selectedReceipt?.id && r.status !== 'rejected' && r.type !== 'thu khác')
       .reduce((sum, r) => sum + Number(r.amount || 0), 0);
     
-    const remainingAmount = totalAmount - totalPaid - Number(formData.amount);
+    let remainingAmount = totalAmount - totalPaid;
+    if (formData.type !== 'thu khác') {
+      remainingAmount -= Number(formData.amount);
+    }
     const selectedDate = parseISO(formData.date);
 
     const data: any = {
@@ -143,15 +159,14 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     }
 
     try {
-      // Update date range to include the saved receipt's month
+      // Update date range to include the saved receipt's month if it's outside current range
       const savedDateStr = formData.date;
       const savedDate = parseISO(savedDateStr);
       const newStart = format(startOfMonth(savedDate), 'yyyy-MM-dd');
       const newEnd = format(endOfMonth(savedDate), 'yyyy-MM-dd');
       
-      // Only update if the saved date is outside current range
-      if (savedDateStr < dateRange.start || savedDateStr > dateRange.end) {
-        setDateRange({ start: newStart, end: newEnd });
+      if (!dateRange.isAll && (savedDateStr < dateRange.start || savedDateStr > dateRange.end)) {
+        setDateRange({ start: newStart, end: newEnd, isAll: false });
       }
 
       if (selectedReceipt) {
@@ -216,9 +231,12 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     const matchesType = typeFilter === 'all' || r.type === typeFilter;
     
     const receiptDate = new Date(r.date || r.createdAt);
-    const startDate = startOfDay(parseISO(dateRange.start));
-    const endDate = endOfDay(parseISO(dateRange.end));
-    const matchesDate = isWithinInterval(receiptDate, { start: startDate, end: endDate });
+    let matchesDate = true;
+    if (!dateRange.isAll) {
+      const startDate = startOfDay(parseISO(dateRange.start));
+      const endDate = endOfDay(parseISO(dateRange.end));
+      matchesDate = isWithinInterval(receiptDate, { start: startDate, end: endDate });
+    }
 
     return matchesSearch && matchesType && matchesDate;
   }).sort((a, b) => {
@@ -362,14 +380,21 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
           </div>
           <div className="flex flex-wrap gap-4 w-full md:w-auto">
             <div className="flex-1 min-w-[140px]">
-              <label className="block text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-1">
-                <Calendar size={12} /> Từ ngày
+              <label className="block text-xs font-bold text-gray-400 uppercase mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1"><Calendar size={12} /> Từ ngày</span>
+                <button 
+                  onClick={() => setDateRange(prev => ({ ...prev, isAll: !prev.isAll }))}
+                  className={cn("text-[10px] px-1 rounded", dateRange.isAll ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-500")}
+                >
+                  {dateRange.isAll ? "Bỏ lọc ngày" : "Tất cả"}
+                </button>
               </label>
               <input
                 type="date"
+                disabled={dateRange.isAll}
                 value={dateRange.start}
-                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value, isAll: false })}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C] disabled:bg-gray-50 disabled:text-gray-400"
               />
             </div>
             <div className="flex-1 min-w-[140px]">
@@ -378,9 +403,10 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
               </label>
               <input
                 type="date"
+                disabled={dateRange.isAll}
                 value={dateRange.end}
-                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value, isAll: false })}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C] disabled:bg-gray-50 disabled:text-gray-400"
               />
             </div>
             <div className="flex-1 min-w-[140px]">
@@ -401,6 +427,14 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                   <option value="thu khác">Thu khác</option>
                 </select>
               </div>
+            </div>
+            <div className="w-full md:w-auto">
+              <button
+                onClick={clearFilters}
+                className="w-full md:w-auto px-4 py-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all text-sm font-medium border border-gray-200"
+              >
+                Xóa lọc
+              </button>
             </div>
           </div>
         </div>
@@ -572,7 +606,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                       const closedAmountStr = customer.closedAmount ? customer.closedAmount.toString() : '0';
                       const totalAmount = parseInt(closedAmountStr.replace(/\D/g, '')) || 0;
                       const totalPaid = receipts
-                        .filter(r => r.customerId === customer.id)
+                        .filter(r => r.customerId === customer.id && r.type !== 'thu khác' && r.status !== 'rejected')
                         .reduce((sum, r) => sum + r.amount, 0);
                       
                       const remaining = totalAmount - totalPaid;
@@ -605,7 +639,7 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
                       <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Đã thu trước đó</p>
                       <p className="font-bold text-blue-600">
                         {formatNumber(receipts
-                          .filter(r => r.customerId === formData.customerId && r.status === 'approved')
+                          .filter(r => r.customerId === formData.customerId && r.status !== 'rejected' && r.type !== 'thu khác')
                           .reduce((sum, r) => sum + Number(r.amount || 0), 0)
                         )} VNĐ
                       </p>
