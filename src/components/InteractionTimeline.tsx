@@ -161,9 +161,16 @@ export default function InteractionTimeline({ customer, profile, onClose }: Inte
                   <div className="absolute left-2 top-0 w-4 h-4 rounded-full bg-white border-2 border-blue-500 z-10" />
                   <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
                     <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        {getStatusIcon(interaction.status)}
-                        <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{interaction.status}</span>
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          {getStatusIcon(interaction.status)}
+                          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{interaction.status}</span>
+                        </div>
+                        {interaction.staffName && (
+                          <span className="text-[10px] text-blue-500 font-medium mt-1">
+                            Bởi: {interaction.staffName}
+                          </span>
+                        )}
                       </div>
                       <span className="text-xs text-gray-400">{formatDate(interaction.createdAt)}</span>
                     </div>

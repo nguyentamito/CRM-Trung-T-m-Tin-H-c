@@ -49,6 +49,26 @@ export default function DebtManager({ profile }: DebtManagerProps) {
   });
 
   const fetchData = async () => {
+    const safeJson = async (res: Response, label: string) => {
+      if (!res.ok) return [];
+      try {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
+        }
+        const text = await res.text();
+        if (text.includes("<!doctype") || text.includes("<html")) {
+          console.warn(`Received HTML instead of JSON for ${label} in DebtManager. Server might be starting up.`);
+        } else {
+          console.warn(`Expected JSON for ${label} but got ${contentType}: ${text.substring(0, 100)}`);
+        }
+        return [];
+      } catch (e) {
+        console.error(`JSON parse error ${label} in DebtManager:`, e);
+        return [];
+      }
+    };
+
     try {
       const ownerIdParam = profile?.role === 'admin' ? '' : `?ownerId=${profile?.uid}`;
       const [custRes, rectRes] = await Promise.all([
@@ -56,12 +76,12 @@ export default function DebtManager({ profile }: DebtManagerProps) {
         fetch('/api/receipts')
       ]);
       
-      if (custRes.ok && rectRes.ok) {
-        const custData = await custRes.json();
-        const rectData = await rectRes.json();
-        setCustomers(Array.isArray(custData) ? custData : []);
-        setReceipts(Array.isArray(rectData) ? rectData : []);
-      }
+      const [custData, rectData] = await Promise.all([
+        safeJson(custRes, "customers"),
+        safeJson(rectRes, "receipts")
+      ]);
+      setCustomers(Array.isArray(custData) ? custData : []);
+      setReceipts(Array.isArray(rectData) ? rectData : []);
     } catch (err) {
       console.error("Error fetching debt data:", err);
     } finally {
@@ -77,7 +97,7 @@ export default function DebtManager({ profile }: DebtManagerProps) {
     return customers
       .filter(c => ['Đã chốt', 'Đã đóng tiền', 'Đã cọc'].includes(c.status))
       .map(customer => {
-        const totalTuition = Number(customer.closedAmount || 0);
+        const totalTuition = parseInt(String(customer.closedAmount || '0').replace(/\D/g, '')) || 0;
         const customerReceipts = receipts.filter(r => r.customerId === customer.id && r.status === 'approved' && r.type !== 'thu khác');
         const collectedTuition = customerReceipts.reduce((sum, r) => sum + Number(r.amount || 0), 0);
         
@@ -275,8 +295,8 @@ export default function DebtManager({ profile }: DebtManagerProps) {
 
       {/* Debt Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
+        <div className="overflow-x-auto scrollbar-hide">
+          <table className="w-full min-w-[1000px] text-left">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Học viên</th>

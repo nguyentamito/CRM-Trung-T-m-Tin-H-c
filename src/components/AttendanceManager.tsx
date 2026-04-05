@@ -50,6 +50,26 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
   const fetchData = async () => {
     if (!profile) return;
 
+    const safeJson = async (res: Response, label: string) => {
+      if (!res.ok) return [];
+      try {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
+        }
+        const text = await res.text();
+        if (text.includes("<!doctype") || text.includes("<html")) {
+          console.warn(`Received HTML instead of JSON for ${label} in AttendanceManager. Server might be starting up.`);
+        } else {
+          console.warn(`Expected JSON for ${label} but got ${contentType}: ${text.substring(0, 100)}`);
+        }
+        return [];
+      } catch (e) {
+        console.error(`JSON parse error ${label} in AttendanceManager:`, e);
+        return [];
+      }
+    };
+
     const start = startOfDay(selectedDate).getTime();
     const end = endOfDay(selectedDate).getTime();
 
@@ -61,9 +81,9 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
       ]);
 
       const [sessionsData, classesData, attendanceData] = await Promise.all([
-        sessionsRes.ok ? sessionsRes.json().catch(() => []) : Promise.resolve([]),
-        classesRes.ok ? classesRes.json().catch(() => []) : Promise.resolve([]),
-        attendanceRes.ok ? attendanceRes.json().catch(() => []) : Promise.resolve([])
+        safeJson(sessionsRes, "sessions"),
+        safeJson(classesRes, "classes"),
+        safeJson(attendanceRes, "attendance")
       ]);
 
       const parsedClasses = (Array.isArray(classesData) ? classesData : []).map((c: any) => ({
@@ -81,6 +101,22 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
       console.error("Error fetching attendance data:", error);
       setLoading(false);
     }
+  };
+
+  const getAttendanceStats = (sessionId: string, classId: string) => {
+    const classData = classes.find(c => String(c.id) === String(classId));
+    if (!classData || !classData.studentIds) return { total: 0, present: 0, completed: false };
+
+    const records = attendanceRecords.filter(r => String(r.sessionId) === String(sessionId));
+    const present = records.filter(r => r.status === 'có mặt').length;
+    
+    const totalStudents = classData.studentIds.length;
+    
+    return {
+      total: totalStudents,
+      present: present,
+      completed: records.length === totalStudents && totalStudents > 0
+    };
   };
 
   useEffect(() => {
@@ -111,6 +147,20 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
     const existingRecord = attendanceRecords.find(
       r => String(r.sessionId) === String(selectedSession.id) && String(r.studentId) === String(studentId)
     );
+
+    // If clicking the same status, delete the record (toggle off)
+    if (existingRecord && existingRecord.status === status) {
+      try {
+        await fetch(`/api/attendance/${existingRecord.id}`, {
+          method: 'DELETE'
+        });
+        fetchData();
+        return;
+      } catch (error) {
+        console.error("Error deleting attendance:", error);
+        return;
+      }
+    }
 
     const data = {
       status,
@@ -155,22 +205,6 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
     } catch (error) {
       console.error("Error updating attendance:", error);
     }
-  };
-
-  const getAttendanceStats = (sessionId: string, classId: string) => {
-    const classData = classes.find(c => String(c.id) === String(classId));
-    if (!classData || !classData.studentIds) return { total: 0, present: 0, completed: false };
-
-    const records = attendanceRecords.filter(r => String(r.sessionId) === String(sessionId));
-    const present = records.filter(r => r.status === 'có mặt').length;
-    
-    const totalStudents = classData.studentIds.length;
-    
-    return {
-      total: totalStudents,
-      present: present,
-      completed: records.length === totalStudents && totalStudents > 0
-    };
   };
 
   return (
@@ -274,8 +308,8 @@ export default function AttendanceManager({ profile }: AttendanceManagerProps) {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto scrollbar-hide">
+          <table className="w-full min-w-[800px] text-left border-collapse">
             <thead>
               <tr className="bg-gray-50/50">
                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Lớp học & Môn học</th>

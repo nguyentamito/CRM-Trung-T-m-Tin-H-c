@@ -200,3 +200,21 @@ CREATE TABLE IF NOT EXISTS payment_vouchers (
     createdAt BIGINT,
     updatedAt BIGINT
 );
+
+CREATE TABLE IF NOT EXISTS staff_attendance (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    staffId VARCHAR(255),
+    staffName VARCHAR(255),
+    date VARCHAR(10), -- YYYY-MM-DD
+    checkInTime BIGINT,
+    checkOutTime BIGINT,
+    plan TEXT,
+    result TEXT,
+    status VARCHAR(20), -- active, completed
+    adminNote TEXT,
+    isEdited BOOLEAN DEFAULT FALSE,
+    editedAt BIGINT,
+    createdAt BIGINT,
+    updatedAt BIGINT,
+    FOREIGN KEY (staffId) REFERENCES users(uid) ON DELETE CASCADE
+);

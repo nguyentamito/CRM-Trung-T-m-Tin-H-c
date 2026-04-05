@@ -213,11 +213,13 @@ export default function UserManagement({ profile }: UserManagementProps) {
                           </div>
                         ) : (
                           <div className="flex items-center gap-2 group">
-                            <p className="text-sm font-semibold text-gray-900">{u.displayName}</p>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {u.displayName === '0' || !u.displayName ? 'Chưa đặt tên' : u.displayName}
+                            </p>
                             <button
                               onClick={() => {
                                 setEditingNameId(u.uid);
-                                setTempName(u.displayName);
+                                setTempName(u.displayName === '0' ? '' : u.displayName);
                               }}
                               className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 transition-all"
                             >

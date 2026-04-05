@@ -124,28 +124,51 @@ export default function CustomerList({ profile }: CustomerListProps) {
     notes: '',
     closedAmount: '',
     source: 'Facebook' as CustomerSource,
+    birthYear: '',
     initialInteraction: '',
     appointmentTime: 0,
     appointmentContent: ''
   });
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (retries = 3, delay = 1000) => {
     if (!profile) return;
+
+    const safeJson = async (res: Response, label: string) => {
+      if (!res.ok) return [];
+      try {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
+        }
+        const text = await res.text();
+        if (text.includes("<!doctype") || text.includes("<html")) {
+          console.warn(`Received HTML instead of JSON for ${label} in CustomerList. Server might be starting up.`);
+        } else {
+          console.warn(`Expected JSON for ${label} but got ${contentType}: ${text.substring(0, 100)}`);
+        }
+        return [];
+      } catch (e) {
+        console.error(`JSON parse error ${label} in CustomerList:`, e);
+        return [];
+      }
+    };
+
     try {
       const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
+      const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
       
       const [customersRes, interactionsRes, subjectsRes, receiptsRes] = await Promise.all([
         fetch(`/api/customers${ownerIdParam}`),
-        fetch(`/api/interactions`),
+        fetch(`/api/interactions${staffIdParam}`),
         fetch(`/api/subjects`),
         fetch(`/api/receipts`)
       ]);
 
       const [customersData, interactionsData, subjectsData, receiptsData] = await Promise.all([
-        customersRes.ok ? customersRes.json().catch(() => []) : Promise.resolve([]),
-        interactionsRes.ok ? interactionsRes.json().catch(() => []) : Promise.resolve([]),
-        subjectsRes.ok ? subjectsRes.json().catch(() => []) : Promise.resolve([]),
-        receiptsRes.ok ? receiptsRes.json().catch(() => []) : Promise.resolve([])
+        safeJson(customersRes, "customers"),
+        safeJson(interactionsRes, "interactions"),
+        safeJson(subjectsRes, "subjects"),
+        safeJson(receiptsRes, "receipts")
       ]);
 
       setCustomers(Array.isArray(customersData) ? customersData : []);
@@ -161,8 +184,13 @@ export default function CustomerList({ profile }: CustomerListProps) {
         });
       }
       setInteractions(latest);
-    } catch (error) {
-      console.error("Error fetching data:", error);
+    } catch (error: any) {
+      if (retries > 0 && (error.message === 'Failed to fetch' || error.name === 'TypeError')) {
+        console.warn(`Fetch failed in CustomerList, retrying in ${delay}ms... (${retries} retries left)`);
+        setTimeout(() => fetchData(retries - 1, delay * 2), delay);
+      } else {
+        console.error("Error fetching data:", error);
+      }
     }
   }, [profile]);
 
@@ -237,21 +265,48 @@ export default function CustomerList({ profile }: CustomerListProps) {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Limit file size to 800KB to stay safe within Firestore 1MB limit
-    if (file.size > 800 * 1024) {
-      alert('Kích thước file quá lớn (tối đa 800KB). Vui lòng chọn file nhỏ hơn.');
+    // Limit file size to 10MB for Google Drive
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Kích thước file quá lớn (tối đa 10MB). Vui lòng chọn file nhỏ hơn.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setReceiptData({ ...receiptData, attachmentUrl: reader.result as string });
-    };
-    reader.readAsDataURL(file);
+    setIsUploading(true);
+    const formDataUpload = new FormData();
+    formDataUpload.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload-to-drive', {
+        method: 'POST',
+        body: formDataUpload,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Upload failed');
+      }
+
+      const data = await response.json();
+      setReceiptData({ ...receiptData, attachmentUrl: data.url });
+    } catch (error: any) {
+      console.error('Error uploading to Drive:', error);
+      alert('Không thể tải lên Google Drive: ' + error.message + '. Vui lòng kiểm tra cấu hình API.');
+      
+      // Fallback
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setReceiptData({ ...receiptData, attachmentUrl: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const filteredCustomers = customers.filter(c => {
@@ -362,6 +417,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
         notes: '',
         closedAmount: '',
         source: 'Facebook' as CustomerSource,
+        birthYear: '',
         initialInteraction: '',
         appointmentTime: 0,
         appointmentContent: ''
@@ -438,6 +494,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
       notes: customer.notes || '',
       closedAmount: formatNumber(customer.closedAmount) || '',
       source: customer.source,
+      birthYear: customer.birthYear || '',
       initialInteraction: '',
       appointmentTime: 0,
       appointmentContent: ''
@@ -467,6 +524,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
             consultationDate: row.consultationdate || row['ngày tư vấn'] || row['date'] || '',
             fbLink: row.fblink || row['link facebook'] || row['facebook'] || '',
             subject: row.subject || row['môn'] || row['môn học'] || '',
+            birthYear: row.birthyear || row['năm sinh'] || '',
             status: row.status || row['trạng thái'] || 'Phân vân',
             notes: row.notes || row['ghi chú'] || '',
             closedAmount: row.closedamount || row['số tiền chốt'] || row['tiền chốt'] || '0',
@@ -491,6 +549,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
             consultationDate: finalConsultationDate,
             fbLink: row.fbLink || '',
             subject: row.subject || '',
+            birthYear: row.birthYear || '',
             status: (row.status || 'Phân vân') as CustomerStatus,
             notes: row.notes || '',
             closedAmount: String(row.closedAmount).replace(/[^0-9]/g, ""),
@@ -591,6 +650,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                 notes: '',
                 closedAmount: '',
                 source: 'Facebook' as CustomerSource,
+                birthYear: '',
                 initialInteraction: '',
                 appointmentTime: 0,
                 appointmentContent: ''
@@ -641,13 +701,14 @@ export default function CustomerList({ profile }: CustomerListProps) {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto scrollbar-hide">
+          <table className="w-full min-w-[1200px] text-left border-collapse">
             <thead>
               <tr className="bg-[#2D5A4C] border-b border-[#2D5A4C]">
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Ngày Tư vấn</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Họ Tên</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Sđt</th>
+                <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Năm sinh</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Môn</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Trạng thái</th>
                 <th className="px-4 py-3 text-xs font-bold text-white uppercase tracking-wider border-r border-[#3D6A5C]">Ghi chú</th>
@@ -675,6 +736,9 @@ export default function CustomerList({ profile }: CustomerListProps) {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
                       {customer.phone}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
+                      {customer.birthYear || ''}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">
                       {customer.subject}
@@ -722,8 +786,8 @@ export default function CustomerList({ profile }: CustomerListProps) {
                               setSelectedCustomer(customer);
                               const totalAmount = parseInt(String(customer.closedAmount || '').replace(/\D/g, '')) || 0;
                               const totalPaid = receipts
-                                .filter(r => r.customerId === customer.id && r.status !== 'rejected' && r.type !== 'thu khác')
-                                .reduce((sum, r) => sum + r.amount, 0);
+                                .filter(r => r.customerId === customer.id && r.status === 'approved' && r.type !== 'thu khác')
+                                .reduce((sum, r) => sum + Number(r.amount || 0), 0);
                               
                               const remaining = totalAmount - totalPaid;
                               setReceiptData({ ...receiptData, amount: remaining > 0 ? remaining : 0 });
@@ -758,7 +822,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
               })}
               {filteredCustomers.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center text-gray-400">
+                  <td colSpan={11} className="px-6 py-12 text-center text-gray-400">
                     Không tìm thấy khách hàng nào phù hợp.
                   </td>
                 </tr>
@@ -825,6 +889,16 @@ export default function CustomerList({ profile }: CustomerListProps) {
                       type="tel"
                       value={formData.phone}
                       onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                      className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-gray-700">Năm sinh</label>
+                    <input
+                      type="text"
+                      value={formData.birthYear}
+                      onChange={(e) => setFormData({...formData, birthYear: e.target.value})}
+                      placeholder="Ví dụ: 1995"
                       className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -992,7 +1066,7 @@ export default function CustomerList({ profile }: CustomerListProps) {
                   <div>
                     <p className="text-xs text-gray-500">Đã thu trước đó</p>
                     <p className="font-bold text-blue-600">
-                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id && r.type !== 'thu khác' && r.status !== 'rejected').reduce((sum, r) => sum + Number(r.amount), 0))} VNĐ
+                      {formatNumber(receipts.filter(r => r.customerId === selectedCustomer.id && r.type !== 'thu khác' && r.status === 'approved').reduce((sum, r) => sum + Number(r.amount || 0), 0))} VNĐ
                     </p>
                   </div>
                 </div>
@@ -1074,33 +1148,61 @@ export default function CustomerList({ profile }: CustomerListProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Chứng từ (Tùy chọn)</label>
-                <div className="flex items-center gap-3">
-                  <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-[#2D5A4C] hover:bg-[#2D5A4C]/5 cursor-pointer transition-all">
-                    <Paperclip size={18} className="text-gray-400" />
-                    <span className="text-sm text-gray-500 font-medium">
-                      {receiptData.attachmentUrl ? 'Đã chọn chứng từ' : 'Tải lên chứng từ (Ảnh/PDF)'}
-                    </span>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-[#2D5A4C] hover:bg-[#2D5A4C]/5 cursor-pointer transition-all">
+                      <Paperclip size={18} className="text-gray-400" />
+                      <span className="text-sm text-gray-500 font-medium">
+                        {isUploading ? (
+                          <span className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#2D5A4C]"></div>
+                            Đang tải lên Drive...
+                          </span>
+                        ) : (
+                          receiptData.attachmentUrl && receiptData.attachmentUrl.startsWith('data:') ? 'Đã chọn file' : 'Tải lên file (Ảnh/PDF)'
+                        )}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                    {receiptData.attachmentUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setReceiptData({ ...receiptData, attachmentUrl: '' })}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Xóa chứng từ"
+                      >
+                        <X size={18} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Paperclip size={16} className="text-gray-400" />
+                    </div>
                     <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      onChange={handleFileChange}
-                      className="hidden"
+                      type="text"
+                      placeholder="Hoặc dán link Google Drive tại đây..."
+                      value={receiptData.attachmentUrl && !receiptData.attachmentUrl.startsWith('data:') ? receiptData.attachmentUrl : ''}
+                      onChange={(e) => setReceiptData({ ...receiptData, attachmentUrl: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C] text-sm"
                     />
-                  </label>
-                  {receiptData.attachmentUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setReceiptData({ ...receiptData, attachmentUrl: '' })}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Xóa chứng từ"
-                    >
-                      <X size={18} />
-                    </button>
-                  )}
+                  </div>
                 </div>
                 {receiptData.attachmentUrl && receiptData.attachmentUrl.startsWith('data:image') && (
                   <div className="mt-2 relative w-20 h-20 rounded-lg overflow-hidden border border-gray-100">
                     <img src={receiptData.attachmentUrl} alt="Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                {receiptData.attachmentUrl && !receiptData.attachmentUrl.startsWith('data:') && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-blue-600 bg-blue-50 p-2 rounded-lg">
+                    <Paperclip size={14} />
+                    <span className="truncate flex-1">{receiptData.attachmentUrl}</span>
                   </div>
                 )}
               </div>

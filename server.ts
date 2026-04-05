@@ -4,9 +4,63 @@ import path from "path";
 import fs from "fs";
 import cors from "cors";
 import dotenv from "dotenv";
+import multer from "multer";
+import { google } from "googleapis";
+import { Readable } from "stream";
 import poolGetter from "./src/db.ts";
 
 dotenv.config();
+
+// Multer setup for memory storage
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+// Google Drive setup (Lazy initialization)
+let driveClient: any = null;
+const getDriveClient = () => {
+  if (driveClient) return driveClient;
+  
+  const keyStr = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!keyStr) {
+    console.warn("GOOGLE_SERVICE_ACCOUNT_KEY is not set. Google Drive uploads will fail.");
+    return null;
+  }
+
+    try {
+      // Key can be a JSON string or a base64 encoded JSON string
+      let key;
+      try {
+        key = JSON.parse(keyStr);
+      } catch {
+        key = JSON.parse(Buffer.from(keyStr, 'base64').toString());
+      }
+
+      if (!key.private_key || !key.client_email) {
+        console.error("Invalid GOOGLE_SERVICE_ACCOUNT_KEY: missing private_key or client_email");
+        return null;
+      }
+
+      console.log(`Initializing Google Drive with Service Account: ${key.client_email}`);
+
+      // Use GoogleAuth for better reliability and automatic token management
+      const auth = new google.auth.GoogleAuth({
+        credentials: {
+          client_email: key.client_email,
+          private_key: key.private_key.replace(/\\n/g, '\n'),
+        },
+        scopes: ['https://www.googleapis.com/auth/drive.file'],
+      });
+
+      driveClient = google.drive({ version: 'v3', auth });
+      return driveClient;
+    } catch (error) {
+      console.error("Failed to initialize Google Drive client:", error);
+      return null;
+    }
+};
 
 async function startServer() {
   console.log("Server starting...");
@@ -22,6 +76,62 @@ async function startServer() {
       console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     }
     next();
+  });
+
+  // API to upload file to Google Drive
+  app.post("/api/upload-to-drive", upload.single('file'), async (req, res) => {
+    try {
+      const drive = getDriveClient();
+      if (!drive) {
+        return res.status(500).json({ error: "Google Drive integration not configured" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || '1a5CP9_DkcNkVw2Y4OnIY-1tPyM1VLawR';
+      
+      const fileMetadata = {
+        name: req.file.originalname,
+        parents: [folderId],
+      };
+
+      // Since we use memoryStorage, we need to pass the buffer as a stream
+      const bufferStream = new Readable();
+      bufferStream.push(req.file.buffer);
+      bufferStream.push(null);
+
+      const response = await drive.files.create({
+        requestBody: fileMetadata,
+        media: {
+          mimeType: req.file.mimetype,
+          body: bufferStream,
+        },
+        fields: 'id, webViewLink, webContentLink',
+      });
+
+      // Make the file readable by anyone with the link
+      try {
+        await drive.permissions.create({
+          fileId: response.data.id,
+          requestBody: {
+            role: 'reader',
+            type: 'anyone',
+          },
+        });
+      } catch (permError) {
+        console.warn("Failed to set file permissions, but file was uploaded:", permError);
+      }
+
+      res.json({ 
+        id: response.data.id, 
+        url: response.data.webViewLink 
+      });
+    } catch (error: any) {
+      console.error("Google Drive Upload Error:", error);
+      res.status(500).json({ error: "Failed to upload to Google Drive", details: error.message });
+    }
   });
 
   // Process-level error handlers
@@ -167,6 +277,19 @@ async function startServer() {
       if (!userColNames.includes('updatedAt')) {
         await pool.query("ALTER TABLE users ADD COLUMN updatedAt BIGINT");
       }
+
+      // Ensure staff_attendance columns
+      const [staffAttCols]: any = await pool.query("DESCRIBE staff_attendance");
+      const staffAttColNames = staffAttCols.map((c: any) => c.Field);
+      if (!staffAttColNames.includes('adminNote')) {
+        await pool.query("ALTER TABLE staff_attendance ADD COLUMN adminNote TEXT");
+      }
+      if (!staffAttColNames.includes('isEdited')) {
+        await pool.query("ALTER TABLE staff_attendance ADD COLUMN isEdited BOOLEAN DEFAULT FALSE");
+      }
+      if (!staffAttColNames.includes('editedAt')) {
+        await pool.query("ALTER TABLE staff_attendance ADD COLUMN editedAt BIGINT");
+      }
     } catch (error) {
       console.error("Error ensuring columns:", error);
     }
@@ -181,21 +304,47 @@ async function startServer() {
         const pool = poolGetter();
         if (!pool) return res.status(503).json({ error: "Database not configured" });
         
-        let query = `SELECT * FROM ${tableName}`;
+        let query = `SELECT t.* FROM ${tableName} t`;
+        
+        // Special case for interactions to include staffName
+        if (tableName === 'interactions') {
+          query = `SELECT t.*, u.displayName as staffName FROM interactions t LEFT JOIN users u ON t.staffId = u.uid`;
+        }
+        
         const params: any[] = [];
         
         const filters: string[] = [];
         if (req.query.ownerId) {
-          filters.push("ownerId = ?");
+          filters.push("t.ownerId = ?");
           params.push(req.query.ownerId);
         }
         if (req.query.staffId) {
-          filters.push("staffId = ?");
+          filters.push("t.staffId = ?");
           params.push(req.query.staffId);
         }
         if (req.query.uid) {
-          filters.push("uid = ?");
+          filters.push("t.uid = ?");
           params.push(req.query.uid);
+        }
+        if (req.query.customerId) {
+          filters.push("t.customerId = ?");
+          params.push(Number(req.query.customerId));
+        }
+        if (req.query.classId) {
+          filters.push("t.classId = ?");
+          params.push(Number(req.query.classId));
+        }
+        if (req.query.teacherId) {
+          filters.push("t.teacherId = ?");
+          params.push(Number(req.query.teacherId));
+        }
+        if (req.query.studentId) {
+          filters.push("t.studentId = ?");
+          params.push(Number(req.query.studentId));
+        }
+        if (req.query.date) {
+          filters.push("t.date = ?");
+          params.push(req.query.date);
         }
 
         // Add date range filtering if start/end are provided
@@ -226,7 +375,7 @@ async function startServer() {
         // Use provided orderByColumn, or fallback to idColumn
         const order = (req.query.order as string) || orderByColumn || idColumn;
         const direction = (req.query.direction as string) === 'ASC' ? 'ASC' : 'DESC';
-        query += ` ORDER BY ${order} ${direction}`;
+        query += ` ORDER BY t.${order} ${direction}`;
         
         const [rows] = await pool.query(query, params);
         res.json(rows);
@@ -434,6 +583,7 @@ async function startServer() {
   createCrudRoutes("attendance", "attendance", "id", "updatedAt");
   createCrudRoutes("payment_vouchers", "payment_vouchers", "id", "date");
   createCrudRoutes("receipts", "receipts", "id", "date");
+  createCrudRoutes("staff_attendance", "staff_attendance", "id", "date");
 
   // Rooms API
   app.get("/api/rooms", async (req, res) => {
@@ -495,8 +645,8 @@ async function startServer() {
   });
 
   // Catch-all for non-existent API routes
-  app.all("/api/*", (req, res) => {
-    console.log(`API route not found: ${req.method} ${req.url}`);
+  app.use("/api", (req, res) => {
+    console.log(`API route not found (fallback): ${req.method} ${req.url}`);
     res.status(404).json({ error: "API route not found" });
   });
 

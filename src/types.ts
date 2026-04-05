@@ -7,6 +7,7 @@ export interface Customer {
   fbLink: string;
   name: string;
   phone: string;
+  birthYear?: string;
   subject: string;
   status: CustomerStatus;
   notes: string;
@@ -27,6 +28,7 @@ export interface Interaction {
   notes: string;
   status: InteractionStatus;
   staffId: string;
+  staffName?: string;
   createdAt: number;
 }
 
@@ -82,7 +84,7 @@ export interface TeachingAssistant {
   createdAt: number;
 }
 
-export type ClassStatus = 'đang học' | 'kết thúc' | 'tạm dừng';
+export type ClassStatus = 'đang học' | 'kết thúc' | 'tạm dừng' | 'đã hoàn thành';
 
 export type RoomType = 'Phòng máy tính' | 'Phòng lý thuyết' | 'Phòng Online' | 'Gia Sư' | 'Doanh nghiệp';
 
@@ -209,6 +211,23 @@ export interface PaymentVoucher {
   date: number; // The date on the voucher (can be backdated)
   status: 'pending' | 'approved' | 'rejected';
   attachmentUrl?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StaffAttendance {
+  id: string;
+  staffId: string;
+  staffName: string;
+  date: string; // YYYY-MM-DD
+  checkInTime: number; // timestamp
+  checkOutTime?: number; // timestamp
+  plan: string;
+  result?: string;
+  status: 'active' | 'completed';
+  adminNote?: string;
+  isEdited?: boolean;
+  editedAt?: number;
   createdAt: number;
   updatedAt: number;
 }

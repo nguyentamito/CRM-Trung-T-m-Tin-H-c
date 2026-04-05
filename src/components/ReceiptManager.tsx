@@ -17,9 +17,10 @@ import {
   Edit2,
   Trash2,
   Paperclip,
-  Eye
+  Eye,
+  ExternalLink
 } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, isWithinInterval, startOfDay, endOfDay, parseISO, subMonths, subDays } from 'date-fns';
 import { cn, formatNumber } from '../lib/utils';
 import { printReceipt } from './ReceiptPrint';
 import Pagination from './Pagination';
@@ -81,7 +82,27 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
   useEffect(() => {
     if (!profile) return;
 
-    const fetchData = async () => {
+    const safeJson = async (res: Response, label: string) => {
+      if (!res.ok) return [];
+      try {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
+        }
+        const text = await res.text();
+        if (text.includes("<!doctype") || text.includes("<html")) {
+          console.warn(`Received HTML instead of JSON for ${label} in ReceiptManager. Server might be starting up.`);
+        } else {
+          console.warn(`Expected JSON for ${label} but got ${contentType}: ${text.substring(0, 100)}`);
+        }
+        return [];
+      } catch (e) {
+        console.error(`JSON parse error ${label} in ReceiptManager:`, e);
+        return [];
+      }
+    };
+
+    const fetchData = async (retries = 3, delay = 1000) => {
       try {
         const [receiptsRes, customersRes, settingsRes] = await Promise.all([
           fetch('/api/receipts'),
@@ -89,28 +110,28 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
           fetch('/api/settings/center_info')
         ]);
 
-        if (receiptsRes.ok) {
-          const data = await receiptsRes.json();
-          setReceipts(Array.isArray(data) ? data : []);
-        }
+        const [receiptsData, customersData, settingsData] = await Promise.all([
+          safeJson(receiptsRes, "receipts"),
+          safeJson(customersRes, "customers"),
+          safeJson(settingsRes, "settings")
+        ]);
 
-        if (customersRes.ok) {
-          const data = await customersRes.json();
-          // Show all customers so the user can select anyone
-          setCustomers(Array.isArray(data) ? data : []);
-        }
-
-        if (settingsRes.ok) {
-          const data = await settingsRes.json();
-          if (Array.isArray(data) && data.length > 0) {
-            setCenterInfo(data[0]);
-          }
+        setReceipts(Array.isArray(receiptsData) ? receiptsData : []);
+        setCustomers(Array.isArray(customersData) ? customersData : []);
+        
+        if (settingsData && !settingsData.error) {
+          setCenterInfo(settingsData);
         }
 
         setLoading(false);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setLoading(false);
+      } catch (error: any) {
+        if (retries > 0 && (error.message === 'Failed to fetch' || error.name === 'TypeError')) {
+          console.warn(`Fetch failed in ReceiptManager, retrying in ${delay}ms... (${retries} retries left)`);
+          setTimeout(() => fetchData(retries - 1, delay * 2), delay);
+        } else {
+          console.error('Error fetching data:', error);
+          setLoading(false);
+        }
       }
     };
     fetchData();
@@ -286,21 +307,48 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Limit file size to 800KB to stay safe within Firestore 1MB limit
-    if (file.size > 800 * 1024) {
-      alert('Kích thước file quá lớn (tối đa 800KB). Vui lòng chọn file nhỏ hơn.');
+    // Limit file size to 10MB for Google Drive
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Kích thước file quá lớn (tối đa 10MB). Vui lòng chọn file nhỏ hơn.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFormData({ ...formData, attachmentUrl: reader.result as string });
-    };
-    reader.readAsDataURL(file);
+    setIsUploading(true);
+    const formDataUpload = new FormData();
+    formDataUpload.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload-to-drive', {
+        method: 'POST',
+        body: formDataUpload,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Upload failed');
+      }
+
+      const data = await response.json();
+      setFormData({ ...formData, attachmentUrl: data.url });
+    } catch (error: any) {
+      console.error('Error uploading to Drive:', error);
+      alert('Không thể tải lên Google Drive: ' + error.message + '. Vui lòng kiểm tra cấu hình API.');
+      
+      // Fallback to local preview if Drive fails (optional, but maybe better to just fail)
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData({ ...formData, attachmentUrl: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   if (loading) {
@@ -318,15 +366,26 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
           <h2 className="text-2xl font-bold text-gray-800">Quản lý Phiếu thu</h2>
           <p className="text-gray-500">Theo dõi các khoản thu học phí từ khách hàng</p>
         </div>
-        {(isAdmin || isStaff) && (
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 bg-[#2D5A4C] text-white px-4 py-2 rounded-lg hover:bg-[#23463a] transition-colors"
+        <div className="flex items-center gap-3">
+          <a
+            href="https://drive.google.com/drive/folders/1a5CP9_DkcNkVw2Y4OnIY-1tPyM1VLawR?usp=sharing"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
           >
-            <Plus size={20} />
-            Tạo phiếu thu
-          </button>
-        )}
+            <ExternalLink size={18} />
+            Thư mục Drive
+          </a>
+          {(isAdmin || isStaff) && (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center justify-center gap-2 bg-[#2D5A4C] text-white px-4 py-2 rounded-lg hover:bg-[#23463a] transition-colors"
+            >
+              <Plus size={20} />
+              Tạo phiếu thu
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -437,10 +496,68 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
               </button>
             </div>
           </div>
+
+          <div className="flex flex-wrap gap-2 mt-4">
+            <button
+              onClick={() => setDateRange({
+                start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+                end: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
+                isAll: false
+              })}
+              className="px-2 py-1 text-[10px] font-bold uppercase bg-gray-50 text-gray-500 rounded border border-gray-100 hover:bg-gray-100"
+            >
+              Tháng này
+            </button>
+            <button
+              onClick={() => {
+                const lastMonth = subMonths(new Date(), 1);
+                setDateRange({
+                  start: format(startOfMonth(lastMonth), 'yyyy-MM-dd'),
+                  end: format(endOfMonth(lastMonth), 'yyyy-MM-dd'),
+                  isAll: false
+                });
+              }}
+              className="px-2 py-1 text-[10px] font-bold uppercase bg-gray-50 text-gray-500 rounded border border-gray-100 hover:bg-gray-100"
+            >
+              Tháng trước
+            </button>
+            <button
+              onClick={() => {
+                const last7Days = subDays(new Date(), 7);
+                setDateRange({
+                  start: format(last7Days, 'yyyy-MM-dd'),
+                  end: format(new Date(), 'yyyy-MM-dd'),
+                  isAll: false
+                });
+              }}
+              className="px-2 py-1 text-[10px] font-bold uppercase bg-gray-50 text-gray-500 rounded border border-gray-100 hover:bg-gray-100"
+            >
+              7 ngày qua
+            </button>
+            <button
+              onClick={() => {
+                const last30Days = subDays(new Date(), 30);
+                setDateRange({
+                  start: format(last30Days, 'yyyy-MM-dd'),
+                  end: format(new Date(), 'yyyy-MM-dd'),
+                  isAll: false
+                });
+              }}
+              className="px-2 py-1 text-[10px] font-bold uppercase bg-gray-50 text-gray-500 rounded border border-gray-100 hover:bg-gray-100"
+            >
+              30 ngày qua
+            </button>
+            <button
+              onClick={() => setDateRange(prev => ({ ...prev, isAll: true }))}
+              className="px-2 py-1 text-[10px] font-bold uppercase bg-gray-50 text-gray-500 rounded border border-gray-100 hover:bg-gray-100"
+            >
+              Tất cả thời gian
+            </button>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto scrollbar-hide">
+          <table className="w-full min-w-[1000px] text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 text-gray-600 text-sm uppercase tracking-wider">
                 <th className="px-6 py-4 font-semibold">Số phiếu / Ngày</th>
@@ -724,33 +841,61 @@ export default function ReceiptManager({ profile }: ReceiptManagerProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Chứng từ (Tùy chọn)</label>
-                <div className="flex items-center gap-3">
-                  <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-[#2D5A4C] hover:bg-gray-50 cursor-pointer transition-all">
-                    <Paperclip size={18} className="text-gray-400" />
-                    <span className="text-sm text-gray-500 font-medium">
-                      {formData.attachmentUrl ? 'Đã chọn chứng từ' : 'Tải lên chứng từ (Ảnh/PDF)'}
-                    </span>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-200 rounded-lg hover:border-[#2D5A4C] hover:bg-gray-50 cursor-pointer transition-all">
+                      <Paperclip size={18} className="text-gray-400" />
+                      <span className="text-sm text-gray-500 font-medium">
+                        {isUploading ? (
+                          <span className="flex items-center gap-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#2D5A4C]"></div>
+                            Đang tải lên Drive...
+                          </span>
+                        ) : (
+                          formData.attachmentUrl && formData.attachmentUrl.startsWith('data:') ? 'Đã chọn file' : 'Tải lên file (Ảnh/PDF)'
+                        )}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                    {formData.attachmentUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, attachmentUrl: '' })}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Xóa chứng từ"
+                      >
+                        <X size={18} />
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Paperclip size={16} className="text-gray-400" />
+                    </div>
                     <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      onChange={handleFileChange}
-                      className="hidden"
+                      type="text"
+                      placeholder="Hoặc dán link Google Drive tại đây..."
+                      value={formData.attachmentUrl && !formData.attachmentUrl.startsWith('data:') ? formData.attachmentUrl : ''}
+                      onChange={(e) => setFormData({ ...formData, attachmentUrl: e.target.value })}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C] text-sm"
                     />
-                  </label>
-                  {formData.attachmentUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, attachmentUrl: '' })}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Xóa chứng từ"
-                    >
-                      <X size={18} />
-                    </button>
-                  )}
+                  </div>
                 </div>
                 {formData.attachmentUrl && formData.attachmentUrl.startsWith('data:image') && (
                   <div className="mt-2 relative w-20 h-20 rounded-lg overflow-hidden border border-gray-100">
                     <img src={formData.attachmentUrl} alt="Preview" className="w-full h-full object-cover" />
+                  </div>
+                )}
+                {formData.attachmentUrl && !formData.attachmentUrl.startsWith('data:') && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-blue-600 bg-blue-50 p-2 rounded-lg">
+                    <Paperclip size={14} />
+                    <span className="truncate flex-1">{formData.attachmentUrl}</span>
                   </div>
                 )}
               </div>

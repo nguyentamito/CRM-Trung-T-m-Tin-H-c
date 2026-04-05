@@ -110,8 +110,29 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
     status: 'chưa diễn ra' as AppointmentStatus
   });
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (retries = 3, delay = 1000) => {
     if (!profile) return;
+
+    const safeJson = async (res: Response, label: string) => {
+      if (!res.ok) return [];
+      try {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
+        }
+        const text = await res.text();
+        if (text.includes("<!doctype") || text.includes("<html")) {
+          console.warn(`Received HTML instead of JSON for ${label} in AppointmentCalendar. Server might be starting up.`);
+        } else {
+          console.warn(`Expected JSON for ${label} but got ${contentType}: ${text.substring(0, 100)}`);
+        }
+        return [];
+      } catch (e) {
+        console.error(`JSON parse error ${label} in AppointmentCalendar:`, e);
+        return [];
+      }
+    };
+
     try {
       const staffIdParam = profile.role === 'admin' ? '' : `?staffId=${profile.uid}`;
       const ownerIdParam = profile.role === 'admin' ? '' : `?ownerId=${profile.uid}`;
@@ -122,14 +143,19 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
       ]);
 
       const [appointmentsData, customersData] = await Promise.all([
-        appointmentsRes.ok ? appointmentsRes.json().catch(() => []) : Promise.resolve([]),
-        customersRes.ok ? customersRes.json().catch(() => []) : Promise.resolve([])
+        safeJson(appointmentsRes, "appointments"),
+        safeJson(customersRes, "customers")
       ]);
 
       setAppointments(Array.isArray(appointmentsData) ? appointmentsData : []);
       setCustomers(Array.isArray(customersData) ? customersData : []);
-    } catch (error) {
-      console.error("Error fetching data:", error);
+    } catch (error: any) {
+      if (retries > 0 && (error.message === 'Failed to fetch' || error.name === 'TypeError')) {
+        console.warn(`Fetch failed in AppointmentCalendar, retrying in ${delay}ms... (${retries} retries left)`);
+        setTimeout(() => fetchData(retries - 1, delay * 2), delay);
+      } else {
+        console.error("Error fetching data:", error);
+      }
     }
   }, [profile]);
 
@@ -168,6 +194,17 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
 
     return () => clearInterval(intervalId);
   }, [appointments]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setViewMode('table');
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
@@ -482,7 +519,7 @@ export default function AppointmentCalendar({ profile }: AppointmentCalendarProp
                       key={app.id} 
                       className={cn(
                         "hover:bg-gray-50/50 transition-all border-b border-gray-100",
-                        isToday(new Date(app.time)) && "bg-blue-50 hover:bg-blue-100"
+                        isToday(new Date(app.time)) && "bg-red-50 hover:bg-red-100"
                       )}
                     >
                       <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-100">

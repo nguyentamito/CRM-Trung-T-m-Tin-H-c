@@ -711,6 +711,7 @@ export default function ClassList({ profile }: ClassListProps) {
           >
             <option value="all">Tất cả trạng thái</option>
             <option value="đang học">Đang học</option>
+            <option value="đã hoàn thành">Đã hoàn thành</option>
             <option value="kết thúc">Kết thúc</option>
             <option value="tạm dừng">Tạm dừng</option>
           </select>
@@ -737,8 +738,8 @@ export default function ClassList({ profile }: ClassListProps) {
 
       {viewType === 'table' ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto scrollbar-hide">
+            <table className="w-full min-w-[1000px] text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Lớp học</th>
@@ -808,6 +809,7 @@ export default function ClassList({ profile }: ClassListProps) {
                     <td className="px-6 py-4">
                       <span className={`inline-block px-2 py-1 rounded text-[10px] uppercase font-bold ${
                         cls.status === 'đang học' ? 'bg-green-100 text-green-700' :
+                        cls.status === 'đã hoàn thành' ? 'bg-blue-100 text-blue-700' :
                         cls.status === 'kết thúc' ? 'bg-gray-100 text-gray-700' :
                         'bg-yellow-100 text-yellow-700'
                       }`}>
@@ -1286,6 +1288,7 @@ export default function ClassList({ profile }: ClassListProps) {
                       className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]"
                     >
                       <option value="đang học">Đang học</option>
+                      <option value="đã hoàn thành">Đã hoàn thành</option>
                       <option value="kết thúc">Kết thúc</option>
                       <option value="tạm dừng">Tạm dừng</option>
                     </select>

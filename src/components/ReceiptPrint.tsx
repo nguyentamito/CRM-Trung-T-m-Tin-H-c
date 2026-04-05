@@ -119,10 +119,6 @@ export const printReceipt = (receipt: Receipt, centerInfo: CenterInfo) => {
         </style>
       </head>
       <body>
-        <div class="warning">
-          Quý khách vui lòng kiểm tra kỹ thông tin trước khi ký duyệt mẫu, nếu sau này in ra có sai sót gì thì công ty chúng tôi không chịu trách nhiệm
-        </div>
-
         <div class="header">
           <div class="company-info">
             <h1>${centerInfo.name}</h1>
